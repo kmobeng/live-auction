@@ -230,6 +230,22 @@ export class AuthService {
     }
   }
 
+  async logoutAllService(
+    userId: string,
+    remainingTTl: number,
+    jti: string,
+  ): Promise<void> {
+    await this.prismaService.refreshToken.deleteMany({
+      where: { userId },
+    });
+
+    if (remainingTTl > 0) {
+      await this.redisService
+        .getClient()
+        .set(`blacklist:${jti}`, 'true', 'EX', remainingTTl);
+    }
+  }
+
   async forgotPasswordService(email: string): Promise<void> {
     // Check if the user exists
     const user = await this.prismaService.user.findUnique({

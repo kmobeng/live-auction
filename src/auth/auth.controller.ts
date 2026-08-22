@@ -147,6 +147,20 @@ export class AuthController {
     };
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Post('logout-all')
+  @HttpCode(HttpStatus.OK)
+  async logoutAll(@CurrentUser() user: AccessJWTPayload) {
+    const remainingTTl = user.exp! - Math.floor(Date.now() / 1000);
+
+    await this.authService.logoutAllService(user.sub, remainingTTl, user.jti!);
+
+    return {
+      success: true,
+      message: 'Logged out from all devices successfully',
+    };
+  }
+
   @Throttle({ default: { limit: 3, ttl: 60 * 60 * 1000 } })
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)

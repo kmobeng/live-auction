@@ -54,8 +54,7 @@ export class OutboxPoller {
   }
 
   private async handleEvent(event: OutboxEvent) {
-    // Normalize underscore variants (legacy rows) to the canonical hyphen form
-    const eventType = event.eventType.replaceAll('_', '-');
+    const eventType = event.eventType;
 
     switch (eventType) {
       case 'user-registered':
