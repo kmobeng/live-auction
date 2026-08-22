@@ -19,6 +19,7 @@ describe('OutboxPoller', () => {
   let update: jest.Mock;
   let enqueueEmailVerification: jest.Mock;
   let enqueuePasswordReset: jest.Mock;
+  let enqueueEmailChangeNotice: jest.Mock;
   let loggerWarn: jest.Mock;
   let loggerError: jest.Mock;
 
@@ -27,6 +28,7 @@ describe('OutboxPoller', () => {
     update = jest.fn().mockResolvedValue(undefined);
     enqueueEmailVerification = jest.fn().mockResolvedValue(undefined);
     enqueuePasswordReset = jest.fn().mockResolvedValue(undefined);
+    enqueueEmailChangeNotice = jest.fn().mockResolvedValue(undefined);
 
     poller = new OutboxPoller(
       {
@@ -35,6 +37,7 @@ describe('OutboxPoller', () => {
       {
         enqueueEmailVerification,
         enqueuePasswordReset,
+        enqueueEmailChangeNotice,
       } as unknown as NotificationService,
     );
 
@@ -107,6 +110,30 @@ describe('OutboxPoller', () => {
     expect(enqueueEmailVerification).toHaveBeenCalledWith({
       to: 'jane@example.com',
       token: '654321',
+    });
+  });
+
+  it('routes email-change-requested events to the new inbox plus a notice to the old one', async () => {
+    findMany.mockResolvedValue([
+      makeEvent({
+        eventType: 'email-change-requested',
+        payload: {
+          email: 'new-jane@example.com',
+          previousEmail: 'jane@example.com',
+          token: '246810',
+        },
+      }),
+    ]);
+
+    await poller.dispatchOutboxEvents();
+
+    expect(enqueueEmailVerification).toHaveBeenCalledWith({
+      to: 'new-jane@example.com',
+      token: '246810',
+    });
+    expect(enqueueEmailChangeNotice).toHaveBeenCalledWith({
+      to: 'jane@example.com',
+      newEmail: 'new-jane@example.com',
     });
   });
 

@@ -46,6 +46,20 @@ export class NotificationProcessor extends WorkerHost {
         });
         break;
       }
+      case 'send-email-change-notice': {
+        const { to, newEmail } = job.data as { to: string; newEmail?: string };
+
+        const message = `A request was made to change the email address on your account${
+          newEmail ? ` to ${newEmail}` : ''
+        }. If this was you, use the code sent to that inbox to finish the change. If this wasn't you, please reset your password immediately and contact support.`;
+
+        await this.emailService.sendEmailDev({
+          email: to,
+          subject: 'Email Change Requested',
+          message: message,
+        });
+        break;
+      }
       default:
         this.logger.warn(log, `No handler for job name: ${job.name}`);
     }

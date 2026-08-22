@@ -19,4 +19,11 @@ export class NotificationService {
   async enqueuePasswordReset(data: EmailVerificationData): Promise<void> {
     await this.notificationsQueue.add('send-password-reset', data);
   }
+
+  async enqueueEmailChangeNotice(data: {
+    to: string;
+    newEmail?: string;
+  }): Promise<void> {
+    await this.notificationsQueue.add('send-email-change-notice', data);
+  }
 }
