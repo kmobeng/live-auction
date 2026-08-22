@@ -7,6 +7,7 @@ import { RedisModule } from './redis/redis.module';
 import { QueueModule } from './queue/queue.module';
 import { NotificationModule } from './notification/notification.module';
 import { OutboxModule } from './outbox/outbox.module';
+import { UsersModule } from './users/users.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
@@ -27,6 +28,7 @@ import { CustomThrottlerGuard } from './common/guards/common-throttler.guard';
     }),
     ScheduleModule.forRoot(),
     AuthModule,
+    UsersModule,
     RedisModule,
     QueueModule,
     NotificationModule,

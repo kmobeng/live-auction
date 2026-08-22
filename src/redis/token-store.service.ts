@@ -3,11 +3,6 @@ import { RedisService } from './redis.service';
 
 const TOKEN_TTL_SECONDS = 10 * 60;
 
-type PendingEmailChange = {
-  newEmail: string;
-  hash: string;
-};
-
 @Injectable()
 export class TokenStoreService {
   constructor(private readonly redisService: RedisService) {}
@@ -42,15 +37,10 @@ export class TokenStoreService {
     return true;
   }
 
-  async issueEmailChange(
-    userId: string,
-    newEmail: string,
-    hashedCode: string,
-  ): Promise<void> {
-    const value: PendingEmailChange = { newEmail, hash: hashedCode };
+  async issueEmailChange(userId: string, hashedCode: string): Promise<void> {
     await this.client().set(
       `email-change:${userId}`,
-      JSON.stringify(value),
+      hashedCode,
       'EX',
       TOKEN_TTL_SECONDS,
     );
@@ -59,20 +49,18 @@ export class TokenStoreService {
   async consumeEmailChange(
     userId: string,
     hashedCode: string,
-  ): Promise<PendingEmailChange | null> {
+  ): Promise<boolean> {
     const key = `email-change:${userId}`;
     const raw = await this.client().get(key);
     if (!raw) {
-      return null;
+      return false;
     }
-
-    const pending = JSON.parse(raw) as PendingEmailChange;
-    if (pending.hash !== hashedCode) {
-      return null;
+    if (raw !== hashedCode) {
+      return false;
     }
 
     await this.client().del(key);
-    return pending;
+    return true;
   }
 
   async issuePasswordReset(userId: string, tokenHash: string): Promise<void> {

@@ -17,15 +17,34 @@ const makeTokenUtils = (nodeEnv = 'test') => {
     get: (key: string) => configValues[key],
   } as unknown as ConfigService;
 
-  return new TokenUtils(new JwtService({}), configService);
+  const client = {
+    sadd: jest.fn().mockResolvedValue(1),
+    expire: jest.fn().mockResolvedValue(1),
+    smembers: jest.fn().mockResolvedValue([]),
+    set: jest.fn().mockResolvedValue('OK'),
+    del: jest.fn().mockResolvedValue(1),
+  };
+
+  const redisService = {
+    getClient: () => client,
+  };
+
+  return {
+    tokenUtils: new TokenUtils(
+      new JwtService({}),
+      configService,
+      redisService as never,
+    ),
+    client,
+  };
 };
 
 describe('TokenUtils', () => {
   describe('access tokens', () => {
-    it('round-trips the payload and injects a jti', () => {
-      const tokenUtils = makeTokenUtils();
+    it('round-trips the payload, injects a jti and registers it in Redis', async () => {
+      const { tokenUtils, client } = makeTokenUtils();
 
-      const token = tokenUtils.generateAccessToken({
+      const token = await tokenUtils.generateAccessToken({
         sub: 'user-1',
         email: 'jane@example.com',
         role: 'USER',
@@ -43,20 +62,24 @@ describe('TokenUtils', () => {
       expect(payload.isEmailVerified).toBe(false);
       expect(payload.needToChangePassword).toBe(false);
       expect(typeof payload.jti).toBe('string');
+
+      // jti registry write with the access-token lifetime as TTL
+      expect(client.sadd).toHaveBeenCalledWith('active-jtis:user-1', payload.jti);
+      expect(client.expire).toHaveBeenCalledWith('active-jtis:user-1', 900);
     });
 
     it('rejects an access token signed with another secret', () => {
-      const tokenUtils = makeTokenUtils();
+      const { tokenUtils } = makeTokenUtils();
 
-      expect(() => tokenUtils.verifyAccessToken('not-a-real-token')).toThrow(
-        UnauthorizedException,
-      );
+      expect(() =>
+        tokenUtils.verifyAccessToken('not-a-real-token'),
+      ).toThrow(UnauthorizedException);
     });
   });
 
   describe('refresh tokens', () => {
     it('round-trips the subject', () => {
-      const tokenUtils = makeTokenUtils();
+      const { tokenUtils } = makeTokenUtils();
 
       const refreshToken = tokenUtils.generateRefreshToken({ sub: 'user-9' });
       const payload = tokenUtils.verifyRefreshToken(refreshToken);
@@ -65,7 +88,7 @@ describe('TokenUtils', () => {
     });
 
     it('rejects an invalid refresh token', () => {
-      const tokenUtils = makeTokenUtils();
+      const { tokenUtils } = makeTokenUtils();
 
       expect(() => tokenUtils.verifyRefreshToken('garbage')).toThrow(
         UnauthorizedException,
@@ -73,10 +96,10 @@ describe('TokenUtils', () => {
     });
   });
 
-  it('keeps the two token types from validating against each other', () => {
-    const tokenUtils = makeTokenUtils();
+  it('keeps the two token types from validating against each other', async () => {
+    const { tokenUtils } = makeTokenUtils();
 
-    const accessToken = tokenUtils.generateAccessToken({
+    const accessToken = await tokenUtils.generateAccessToken({
       sub: 'user-1',
       email: 'jane@example.com',
       role: 'USER',
@@ -94,9 +117,52 @@ describe('TokenUtils', () => {
     );
   });
 
+  describe('revokeAllAccessTokens', () => {
+    it('blacklists every registered jti and clears the registry', async () => {
+      const { tokenUtils, client } = makeTokenUtils();
+      client.smembers.mockResolvedValue(['jti-a', 'jti-b']);
+
+      await tokenUtils.revokeAllAccessTokens('user-1');
+
+      expect(client.smembers).toHaveBeenCalledWith('active-jtis:user-1');
+      expect(client.set).toHaveBeenCalledTimes(2);
+      expect(client.set).toHaveBeenCalledWith('blacklist:jti-a', 'true', 'EX', 900);
+      expect(client.set).toHaveBeenCalledWith('blacklist:jti-b', 'true', 'EX', 900);
+      expect(client.del).toHaveBeenCalledWith('active-jtis:user-1');
+    });
+
+    it('still clears the registry when no jtis were ever registered', async () => {
+      const { tokenUtils, client } = makeTokenUtils();
+      client.smembers.mockResolvedValue([]);
+
+      await tokenUtils.revokeAllAccessTokens('user-42');
+
+      expect(client.set).not.toHaveBeenCalled();
+      expect(client.del).toHaveBeenCalledWith('active-jtis:user-42');
+    });
+  });
+
+  describe('blacklistAccessToken', () => {
+    it('blacklists a single live jti for its remaining lifetime', async () => {
+      const { tokenUtils, client } = makeTokenUtils();
+
+      await tokenUtils.blacklistAccessToken('jti-c', 120);
+
+      expect(client.set).toHaveBeenCalledWith('blacklist:jti-c', 'true', 'EX', 120);
+    });
+
+    it('does nothing when the token already expired', async () => {
+      const { tokenUtils, client } = makeTokenUtils();
+
+      await tokenUtils.blacklistAccessToken('jti-c', 0);
+
+      expect(client.set).not.toHaveBeenCalled();
+    });
+  });
+
   describe('refresh cookie options', () => {
     it('is httpOnly and not secure outside production', () => {
-      const tokenUtils = makeTokenUtils('development');
+      const { tokenUtils } = makeTokenUtils('development');
 
       const before = Date.now();
       const options = tokenUtils.setRefreshTokenCookieOptions();
@@ -107,16 +173,12 @@ describe('TokenUtils', () => {
       expect(options.sameSite).toBeUndefined();
 
       const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
-      expect(options.expires.getTime()).toBeGreaterThanOrEqual(
-        before + sevenDaysMs,
-      );
-      expect(options.expires.getTime()).toBeLessThanOrEqual(
-        after + sevenDaysMs,
-      );
+      expect(options.expires.getTime()).toBeGreaterThanOrEqual(before + sevenDaysMs);
+      expect(options.expires.getTime()).toBeLessThanOrEqual(after + sevenDaysMs);
     });
 
     it('hardens with secure and sameSite strict in production', () => {
-      const tokenUtils = makeTokenUtils('production');
+      const { tokenUtils } = makeTokenUtils('production');
 
       const options = tokenUtils.setRefreshTokenCookieOptions();
 

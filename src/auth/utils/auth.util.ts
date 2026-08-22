@@ -7,12 +7,16 @@ import {
 } from '../../common/interfaces/jwt.interface';
 import type { Response } from 'express';
 import { randomUUID } from 'crypto';
+import { RedisService } from '../../redis/redis.service';
+
+const DEFAULT_ACCESS_TTL_SECONDS = 15 * 60;
 
 @Injectable()
 export class TokenUtils {
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly redisService: RedisService,
   ) {}
 
   setRefreshTokenCookieOptions() {
@@ -35,7 +39,7 @@ export class TokenUtils {
     return RefreshCookieOptions;
   }
 
-  generateAccessToken(payload: AccessJWTPayload): string {
+  async generateAccessToken(payload: AccessJWTPayload): Promise<string> {
     const jti = randomUUID();
     payload.jti = jti;
 
@@ -43,7 +47,43 @@ export class TokenUtils {
       secret: this.configService.get('JWT_SECRET'),
       expiresIn: this.configService.get('JWT_EXPIRES_IN'),
     });
+
+    // Track the jti so a password reset / logout-all / email change can blacklist every live access token for this user in one sweep
+    const registryKey = `active-jtis:${payload.sub}`;
+    const ttlSeconds = this.accessTtlSeconds();
+    const client = this.redisService.getClient();
+    await client.sadd(registryKey, jti);
+    await client.expire(registryKey, ttlSeconds);
+
     return token;
+  }
+
+  async blacklistAccessToken(
+    jti: string,
+    remainingTtlSeconds: number,
+  ): Promise<void> {
+    if (remainingTtlSeconds <= 0) {
+      return;
+    }
+
+    await this.redisService
+      .getClient()
+      .set(`blacklist:${jti}`, 'true', 'EX', remainingTtlSeconds);
+  }
+
+  async revokeAllAccessTokens(userId: string): Promise<void> {
+    const client = this.redisService.getClient();
+    const registryKey = `active-jtis:${userId}`;
+
+    const jtis = await client.smembers(registryKey);
+    const ttlSeconds = this.accessTtlSeconds();
+
+    await Promise.all(
+      jtis.map((jti) =>
+        client.set(`blacklist:${jti}`, 'true', 'EX', ttlSeconds),
+      ),
+    );
+    await client.del(registryKey);
   }
 
   sendRefreshToken(res: Response, refreshToken: string): void {
@@ -78,6 +118,33 @@ export class TokenUtils {
       return payload;
     } catch (_error) {
       throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+  }
+
+  private accessTtlSeconds(): number {
+    const raw = this.configService.get<string>('JWT_EXPIRES_IN');
+    if (!raw) {
+      return DEFAULT_ACCESS_TTL_SECONDS;
+    }
+
+    // Parse the TTL string (e.g., "1h", "30m", "1d")
+    const match = /^(\d+)\s*([smhd])$/.exec(raw.trim());
+    if (!match) {
+      return DEFAULT_ACCESS_TTL_SECONDS;
+    }
+
+    const amount = Number(match[1]);
+    switch (match[2]) {
+      case 's':
+        return amount;
+      case 'm':
+        return amount * 60;
+      case 'h':
+        return amount * 3600;
+      case 'd':
+        return amount * 86400;
+      default:
+        return DEFAULT_ACCESS_TTL_SECONDS;
     }
   }
 }

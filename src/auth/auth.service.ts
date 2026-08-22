@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { RegisterDto } from './dto/register.dto';
@@ -12,6 +13,7 @@ import { TokenUtils } from './utils/auth.util';
 import { OutboxService } from '../outbox/outbox.service';
 import { ConfigService } from '@nestjs/config';
 import { RedisService } from '../redis/redis.service';
+import { TokenStoreService } from '../redis/token-store.service';
 
 @Injectable()
 export class AuthService {
@@ -21,6 +23,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly outboxService: OutboxService,
     private readonly redisService: RedisService,
+    private readonly tokenStoreService: TokenStoreService,
   ) {}
 
   async registerService(
@@ -38,9 +41,26 @@ export class AuthService {
 
     const hashpassword = await bcrypt.hash(registerDto.password, 12);
 
+    const userId = crypto.randomUUID();
+
+    const { token, hashedToken: hashedVerificationToken } =
+      this.emailTokenGeneration();
+
+    try {
+      await this.tokenStoreService.issueEmailVerificationCode(
+        userId,
+        hashedVerificationToken,
+      );
+    } catch (_error) {
+      throw new ServiceUnavailableException(
+        'Registration is temporarily unavailable. Please try again.',
+      );
+    }
+
     return this.prismaService.$transaction(async (tx) => {
       const user = await tx.user.create({
         data: {
+          id: userId,
           email: registerDto.email,
           password: hashpassword,
           name: registerDto.name,
@@ -68,17 +88,6 @@ export class AuthService {
                 60 *
                 1000,
           ),
-        },
-      });
-
-      const { token, hashedToken: hashedVerificationToken } =
-        this.emailTokenGeneration();
-
-      await tx.emailVerificationToken.create({
-        data: {
-          userId: user.id,
-          token: hashedVerificationToken,
-          expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
         },
       });
 
@@ -147,7 +156,7 @@ export class AuthService {
   async refreshTokenService(
     hashRefreshToken: string,
     userId: string,
-  ): Promise<{ accessToken: string; refreshToken: string }> {
+  ): Promise<{ accessToken: Promise<string>; refreshToken: string }> {
     // Check if the refresh token exists and is valid
     const refreshTokenRecord = await this.prismaService.refreshToken.findFirst({
       where: {
@@ -203,7 +212,10 @@ export class AuthService {
       },
     });
 
-    return { accessToken: newAccessToken, refreshToken: newRefreshToken };
+    return {
+      accessToken: newAccessToken,
+      refreshToken: newRefreshToken,
+    };
   }
 
   async logoutService(
@@ -235,6 +247,9 @@ export class AuthService {
     remainingTTl: number,
     jti: string,
   ): Promise<void> {
+    // Blacklist every live access token for this user across all devices
+    await this.tokenUtils.revokeAllAccessTokens(userId);
+
     await this.prismaService.refreshToken.deleteMany({
       where: { userId },
     });
@@ -256,58 +271,54 @@ export class AuthService {
       return;
     }
 
-    // Generate a random token for password reset
+    // Generate a random token for the reset link
     const token = crypto.randomBytes(32).toString('hex');
     const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
 
-    await this.prismaService.$transaction(async (tx) => {
-      await tx.passwordResetToken.create({
-        data: {
-          userId: user.id,
-          token: hashedToken,
-          expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
-        },
-      });
+    // Store in Redis first so an outage never emails a dead link
+    try {
+      await this.tokenStoreService.issuePasswordReset(user.id, hashedToken);
+    } catch (_error) {
+      throw new ServiceUnavailableException(
+        'Unable to process your request right now. Please try again.',
+      );
+    }
 
-      // Create an outbox event for the password reset request
-      await this.outboxService.createEvent(tx, {
-        aggregateId: user.id,
-        aggregateType: 'user',
-        eventType: 'password-reset-requested',
-        payload: {
-          email: user.email,
-          resetToken: token,
-        },
-      });
+    await this.outboxService.createEvent(this.prismaService, {
+      aggregateId: user.id,
+      aggregateType: 'user',
+      eventType: 'password-reset-requested',
+      payload: {
+        email: user.email,
+        resetToken: token,
+      },
     });
   }
 
   async resetPasswordService(token: string, password: string): Promise<void> {
-    const tokenExist = await this.prismaService.passwordResetToken.findUnique({
-      where: { token },
-    });
+    // The controller passes the already-hashed URL token; the store is keyed
+    // by that hash and returns the owning userId
+    const userId = await this.tokenStoreService.consumePasswordReset(token);
 
-    if (!tokenExist || tokenExist.expiresAt < new Date()) {
+    if (!userId) {
       throw new BadRequestException('Invalid or expired reset url');
     }
 
     await this.prismaService.$transaction(async (tx) => {
       await tx.user.update({
-        where: { id: tokenExist.userId },
+        where: { id: userId },
         data: {
           password,
           passwordChangedAt: new Date(),
         },
       });
 
-      await tx.passwordResetToken.deleteMany({
-        where: { userId: tokenExist.userId },
-      });
-
       await tx.refreshToken.deleteMany({
-        where: { userId: tokenExist.userId },
+        where: { userId },
       });
     });
+
+    await this.tokenUtils.revokeAllAccessTokens(userId);
   }
 
   async requestEmailVerificationService(
@@ -317,24 +328,25 @@ export class AuthService {
     const { token, hashedToken: hashedVerificationToken } =
       this.emailTokenGeneration();
 
-    await this.prismaService.$transaction(async (tx) => {
-      await tx.emailVerificationToken.create({
-        data: {
-          userId,
-          token: hashedVerificationToken,
-          expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
-        },
-      });
+    try {
+      await this.tokenStoreService.issueEmailVerificationCode(
+        userId,
+        hashedVerificationToken,
+      );
+    } catch (_error) {
+      throw new ServiceUnavailableException(
+        'Unable to send a verification code right now. Please try again.',
+      );
+    }
 
-      await this.outboxService.createEvent(tx, {
-        aggregateId: userId,
-        aggregateType: 'user',
-        eventType: 'email-verification-requested',
-        payload: {
-          email,
-          token: token,
-        },
-      });
+    await this.outboxService.createEvent(this.prismaService, {
+      aggregateId: userId,
+      aggregateType: 'user',
+      eventType: 'email-verification-requested',
+      payload: {
+        email,
+        token,
+      },
     });
   }
 
@@ -344,30 +356,20 @@ export class AuthService {
     jti: string,
     ttl: number,
   ): Promise<void> {
-    const tokenExist =
-      await this.prismaService.emailVerificationToken.findUnique({
-        where: { token },
-      });
+    const consumed = await this.tokenStoreService.consumeEmailVerificationCode(
+      userId,
+      token,
+    );
 
-    if (
-      !tokenExist ||
-      tokenExist.expiresAt < new Date() ||
-      tokenExist.userId !== userId
-    ) {
+    if (!consumed) {
       throw new BadRequestException('Invalid or expired verification token');
     }
 
-    await this.prismaService.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id: userId },
-        data: {
-          isEmailVerified: true,
-        },
-      });
-
-      await tx.emailVerificationToken.deleteMany({
-        where: { userId },
-      });
+    await this.prismaService.user.update({
+      where: { id: userId },
+      data: {
+        isEmailVerified: true,
+      },
     });
 
     if (ttl > 0) {
