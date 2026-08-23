@@ -72,8 +72,8 @@ describe('UsersService', () => {
         update: jest.fn(),
       },
       refreshToken: { deleteMany: jest.fn() },
-      $transaction: jest.fn(
-        (callback: (client: typeof tx) => unknown) => callback(tx),
+      $transaction: jest.fn((callback: (client: typeof tx) => unknown) =>
+        callback(tx),
       ),
     };
 
@@ -92,9 +92,9 @@ describe('UsersService', () => {
     service = new UsersService(
       prisma as unknown as PrismaService,
       tokenUtils as unknown as TokenUtils,
-      { createEvent: outboxCreateEvent } as unknown as OutboxService,
+      { createEvent: outboxCreateEvent },
       tokenStore as unknown as TokenStoreService,
-      {} as unknown as ConfigService,
+      {},
     );
   });
 
@@ -329,12 +329,7 @@ describe('UsersService', () => {
         makeUser({ email: 'new-jane@example.com' }),
       );
 
-      await service.confirmEmailChangeService(
-        'user-1',
-        hashedCode,
-        0,
-        'jti-9',
-      );
+      await service.confirmEmailChangeService('user-1', hashedCode, 0, 'jti-9');
 
       expect(tokenUtils.revokeAllAccessTokens).toHaveBeenCalledWith('user-1');
       expect(tokenUtils.blacklistAccessToken).not.toHaveBeenCalled();

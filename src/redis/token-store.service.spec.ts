@@ -98,7 +98,10 @@ describe('TokenStoreService', () => {
         JSON.stringify({ newEmail: 'new@example.com', hash: 'hash-123' }),
       );
       const consumed = await service.consumeEmailChange('user-1', 'hash-123');
-      expect(consumed).toEqual({ newEmail: 'new@example.com', hash: 'hash-123' });
+      expect(consumed).toEqual({
+        newEmail: 'new@example.com',
+        hash: 'hash-123',
+      });
       expect(client.del).toHaveBeenCalledWith('email-change:user-1');
     });
 

@@ -64,16 +64,19 @@ describe('TokenUtils', () => {
       expect(typeof payload.jti).toBe('string');
 
       // jti registry write with the access-token lifetime as TTL
-      expect(client.sadd).toHaveBeenCalledWith('active-jtis:user-1', payload.jti);
+      expect(client.sadd).toHaveBeenCalledWith(
+        'active-jtis:user-1',
+        payload.jti,
+      );
       expect(client.expire).toHaveBeenCalledWith('active-jtis:user-1', 900);
     });
 
     it('rejects an access token signed with another secret', () => {
       const { tokenUtils } = makeTokenUtils();
 
-      expect(() =>
-        tokenUtils.verifyAccessToken('not-a-real-token'),
-      ).toThrow(UnauthorizedException);
+      expect(() => tokenUtils.verifyAccessToken('not-a-real-token')).toThrow(
+        UnauthorizedException,
+      );
     });
   });
 
@@ -126,8 +129,18 @@ describe('TokenUtils', () => {
 
       expect(client.smembers).toHaveBeenCalledWith('active-jtis:user-1');
       expect(client.set).toHaveBeenCalledTimes(2);
-      expect(client.set).toHaveBeenCalledWith('blacklist:jti-a', 'true', 'EX', 900);
-      expect(client.set).toHaveBeenCalledWith('blacklist:jti-b', 'true', 'EX', 900);
+      expect(client.set).toHaveBeenCalledWith(
+        'blacklist:jti-a',
+        'true',
+        'EX',
+        900,
+      );
+      expect(client.set).toHaveBeenCalledWith(
+        'blacklist:jti-b',
+        'true',
+        'EX',
+        900,
+      );
       expect(client.del).toHaveBeenCalledWith('active-jtis:user-1');
     });
 
@@ -148,7 +161,12 @@ describe('TokenUtils', () => {
 
       await tokenUtils.blacklistAccessToken('jti-c', 120);
 
-      expect(client.set).toHaveBeenCalledWith('blacklist:jti-c', 'true', 'EX', 120);
+      expect(client.set).toHaveBeenCalledWith(
+        'blacklist:jti-c',
+        'true',
+        'EX',
+        120,
+      );
     });
 
     it('does nothing when the token already expired', async () => {
@@ -173,8 +191,12 @@ describe('TokenUtils', () => {
       expect(options.sameSite).toBeUndefined();
 
       const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
-      expect(options.expires.getTime()).toBeGreaterThanOrEqual(before + sevenDaysMs);
-      expect(options.expires.getTime()).toBeLessThanOrEqual(after + sevenDaysMs);
+      expect(options.expires.getTime()).toBeGreaterThanOrEqual(
+        before + sevenDaysMs,
+      );
+      expect(options.expires.getTime()).toBeLessThanOrEqual(
+        after + sevenDaysMs,
+      );
     });
 
     it('hardens with secure and sameSite strict in production', () => {

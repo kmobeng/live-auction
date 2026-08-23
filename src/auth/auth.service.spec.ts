@@ -89,8 +89,8 @@ describe('AuthService', () => {
         update: jest.fn(),
         deleteMany: jest.fn(),
       },
-      $transaction: jest.fn(
-        (callback: (client: typeof tx) => unknown) => callback(tx),
+      $transaction: jest.fn((callback: (client: typeof tx) => unknown) =>
+        callback(tx),
       ),
     };
 
@@ -119,7 +119,7 @@ describe('AuthService', () => {
       prisma as unknown as PrismaService,
       tokenUtils as unknown as TokenUtils,
       { get: configGet } as unknown as ConfigService,
-      { createEvent: outboxCreateEvent } as unknown as OutboxService,
+      { createEvent: outboxCreateEvent },
       { getClient: () => ({ set: redisSet }) } as unknown as RedisService,
       tokenStore as unknown as TokenStoreService,
     );
@@ -502,7 +502,8 @@ describe('AuthService', () => {
       );
 
       expect(tokenStore.issueEmailVerificationCode).toHaveBeenCalledTimes(1);
-      const [issuedUserId] = tokenStore.issueEmailVerificationCode.mock.calls[0];
+      const [issuedUserId] =
+        tokenStore.issueEmailVerificationCode.mock.calls[0];
       expect(issuedUserId).toBe('user-1');
 
       expect(
@@ -550,10 +551,7 @@ describe('AuthService', () => {
         where: { id: 'user-1' },
         data: { isEmailVerified: true },
       });
-      expect(tokenUtils.blacklistAccessToken).toHaveBeenCalledWith(
-        'jti-3',
-        90,
-      );
+      expect(tokenUtils.blacklistAccessToken).toHaveBeenCalledWith('jti-3', 90);
     });
 
     it('rejects an invalid or expired code without verifying anything', async () => {
