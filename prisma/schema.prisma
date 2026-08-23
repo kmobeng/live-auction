@@ -13,6 +13,12 @@ enum Role {
   ADMIN
 }
 
+enum AuctionStatus {
+  UPCOMING
+  ACTIVE
+  ENDED
+}
+
 model User {
   id                      String   @id @default(uuid())
   email                   String   @unique
@@ -29,6 +35,7 @@ model User {
 
   refreshTokens           RefreshToken[]
   bids                    Bid[]
+  auctions                Auction[]
 }
 
 model OutboxEvent {
@@ -55,17 +62,22 @@ model RefreshToken {
 
 
 model Auction {
-  id          String   @id @default(uuid())
+  id          String        @id @default(uuid())
   title       String
   description String?
-  startingBid Float
-  currentBid  Float?
+  startingBid Decimal
+  currentBid  Decimal?
+  status      AuctionStatus @default(UPCOMING)
+  sellerId    String
+  seller      User          @relation(fields: [sellerId], references: [id], onDelete: Cascade)
   startTime   DateTime
   endTime     DateTime
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
   bids        Bid[]
+
+  @@index([status, endTime])
 }
 
 model Bid {
@@ -74,6 +86,6 @@ model Bid {
   auction   Auction  @relation(fields: [auctionId], references: [id], onDelete: Cascade)
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  amount    Float
+  amount    Decimal
   createdAt DateTime @default(now())
 }
