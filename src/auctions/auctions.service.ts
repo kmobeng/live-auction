@@ -165,7 +165,6 @@ export class AuctionsService {
         dto.description === null ? null : dto.description.trim();
     }
     if (dto.startingBid !== undefined) {
-      // No bids exist yet, so currentBid still mirrors startingBid - keep it in sync
       data.startingBid = dto.startingBid;
       data.currentBid = dto.startingBid;
     }
@@ -246,24 +245,13 @@ export class AuctionsService {
     auction: AuctionRecord & {
       seller: { id: string; name: string | null };
       bids: Array<{
-        amount: number;
+        amount: Prisma.Decimal;
         createdAt: Date;
         user: { id: string; name: string | null };
       }>;
     },
   ) {
     const now = new Date();
-
-    // Computed from wall clock so a flip the scheduler has not persisted yet
-    // is never reported stale on the detail view
-    let status: AuctionStatus;
-    if (now < auction.startTime) {
-      status = 'UPCOMING';
-    } else if (now < auction.endTime) {
-      status = 'ACTIVE';
-    } else {
-      status = 'ENDED';
-    }
 
     const [topBid] = auction.bids;
 
@@ -273,7 +261,7 @@ export class AuctionsService {
       description: auction.description,
       startingBid: auction.startingBid,
       currentBid: auction.currentBid,
-      status,
+      status: auction.status,
       seller: auction.seller,
       startTime: auction.startTime,
       endTime: auction.endTime,
@@ -288,10 +276,10 @@ export class AuctionsService {
         : null,
       serverTime: now.toISOString(),
       timeRemainingMs:
-        status === 'ENDED'
+        auction.status === 'ENDED'
           ? 0
           : Math.max(
-              (status === 'UPCOMING'
+              (auction.status === 'UPCOMING'
                 ? auction.startTime
                 : auction.endTime
               ).getTime() - now.getTime(),

@@ -48,7 +48,6 @@ export class AuctionsController {
     };
   }
 
-  // Declared before ':id' so Nest resolves the static segment first
   @UseGuards(JwtAuthGuard)
   @Get('mine')
   async mine(
@@ -66,7 +65,6 @@ export class AuctionsController {
     };
   }
 
-  // Declared before ':id' so Nest resolves ':id/bids' correctly
   @Get(':id/bids')
   async bids(
     @Param('id', ParseUUIDPipe) id: string,
