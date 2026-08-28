@@ -3,6 +3,8 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { ConfigModule } from '@nestjs/config';
+import { LoggerModule } from 'nestjs-pino';
+import { LoggerOptions } from './common/utils/logger-pino.util';
 import { RedisModule } from './redis/redis.module';
 import { QueueModule } from './queue/queue.module';
 import { NotificationModule } from './notification/notification.module';
@@ -19,6 +21,7 @@ import { CustomThrottlerGuard } from './common/guards/common-throttler.guard';
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    LoggerModule.forRoot(LoggerOptions()),
     ThrottlerModule.forRoot({
       throttlers: [
         {

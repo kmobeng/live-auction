@@ -138,7 +138,7 @@ describe('AuthService', () => {
 
     it('issues the verification code before writing anything to Postgres', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
-      tx.user.create.mockImplementation(async (args: any) =>
+      tx.user.create.mockImplementation((args: any) =>
         makeUser({ id: args.data.id }),
       );
 
@@ -152,7 +152,7 @@ describe('AuthService', () => {
 
     it('creates the user and refresh session inside one transaction plus an outbox event', async () => {
       prisma.user.findUnique.mockResolvedValue(null);
-      tx.user.create.mockImplementation(async (args: any) =>
+      tx.user.create.mockImplementation((args: any) =>
         makeUser({ id: args.data.id }),
       );
 
