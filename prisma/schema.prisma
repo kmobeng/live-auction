@@ -26,7 +26,6 @@ model User {
   password                String
   role                    Role     @default(USER)
   provider                String?  @default("local")
-  needToChangePassword    Boolean  @default(false)
   isEmailVerified         Boolean  @default(false)
   pendingEmail             String?
   passwordChangedAt       DateTime?

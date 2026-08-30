@@ -15,6 +15,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { CustomThrottlerGuard } from './common/guards/common-throttler.guard';
+import { BidsModule } from './bids/bids.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { CustomThrottlerGuard } from './common/guards/common-throttler.guard';
     QueueModule,
     NotificationModule,
     OutboxModule,
+    BidsModule,
   ],
   controllers: [AppController],
   providers: [
