@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
-import type { AuctionStatus, Prisma } from '../../generated/prisma/client';
+import { AuctionStatus, Prisma } from '../../generated/prisma/client';
 import { CreateAuctionDto } from './dto/create-auction.dto';
 import { UpdateAuctionDto } from './dto/update-auction.dto';
 import { PaginationQueryDto, QueryAuctionsDto } from './dto/query-auctions.dto';
@@ -309,6 +309,32 @@ export class AuctionsService {
     }
 
     return auction;
+  }
+
+  async joinAuctionService(userId: string, auctionId: string) {
+    const auction = await this.prismaService.auction.findUnique({
+      where: { id: auctionId },
+      select: { id: true, status: true },
+    });
+
+    if (!auction) {
+      throw new NotFoundException('Auction not found');
+    }
+
+    if (auction.status !== AuctionStatus.ACTIVE) {
+      throw new ConflictException(
+        'Auction is not active. You can only join active auctions.',
+      );
+    }
+
+    const participant = await this.prismaService.auctionParticipant.create({
+      data: {
+        userId,
+        auctionId,
+      },
+    });
+
+    return participant;
   }
 
   private toListItem(

@@ -182,7 +182,6 @@ export class AuthService {
       role: refreshTokenRecord.user.role,
       provider: refreshTokenRecord.user.provider!,
       isEmailVerified: refreshTokenRecord.user.isEmailVerified,
-      needToChangePassword: refreshTokenRecord.user.needToChangePassword,
     };
 
     const newAccessToken = this.tokenUtils.generateAccessToken(accessPayload);

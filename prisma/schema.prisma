@@ -35,6 +35,7 @@ model User {
   refreshTokens           RefreshToken[]
   bids                    Bid[]
   auctions                Auction[]
+  auctionParticipants     AuctionParticipant[]
 }
 
 model OutboxEvent {
@@ -75,6 +76,7 @@ model Auction {
   updatedAt   DateTime      @updatedAt
 
   bids        Bid[]
+  participants AuctionParticipant[]
 
   @@index([status, endTime])
 }
@@ -87,4 +89,16 @@ model Bid {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   amount    Decimal
   createdAt DateTime @default(now())
+}
+
+model AuctionParticipant {
+  id        String   @id @default(uuid())
+  joinedAt  DateTime @default(now())
+  auctionId String
+  auction   Auction  @relation(fields: [auctionId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([auctionId, userId])
 }

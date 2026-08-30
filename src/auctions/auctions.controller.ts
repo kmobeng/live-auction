@@ -19,12 +19,13 @@ import { AuctionsService } from './auctions.service';
 import { CreateAuctionDto } from './dto/create-auction.dto';
 import { UpdateAuctionDto } from './dto/update-auction.dto';
 import { PaginationQueryDto, QueryAuctionsDto } from './dto/query-auctions.dto';
+import { IsEmailVerifiedGuard } from '../common/guards/is-email-verified.guard';
 
 @Controller('auctions')
 export class AuctionsController {
   constructor(private readonly auctionsService: AuctionsService) {}
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, IsEmailVerifiedGuard)
   @Post()
   async create(
     @CurrentUser() user: AccessJWTPayload,
@@ -48,7 +49,7 @@ export class AuctionsController {
     };
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, IsEmailVerifiedGuard)
   @Get('mine')
   async mine(
     @CurrentUser() user: AccessJWTPayload,
@@ -88,7 +89,7 @@ export class AuctionsController {
     };
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, IsEmailVerifiedGuard)
   @Patch(':id')
   async update(
     @CurrentUser() user: AccessJWTPayload,
@@ -108,7 +109,7 @@ export class AuctionsController {
     };
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, IsEmailVerifiedGuard)
   @Delete(':id')
   @HttpCode(HttpStatus.OK)
   async remove(
@@ -120,6 +121,20 @@ export class AuctionsController {
     return {
       success: true,
       message: 'Auction deleted successfully',
+    };
+  }
+
+  @UseGuards(JwtAuthGuard, IsEmailVerifiedGuard)
+  @Post("/join/:id")
+  async joinAuction(
+    @CurrentUser() user: AccessJWTPayload,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    const data = await this.auctionsService.joinAuctionService(user.sub, id);
+
+    return {
+      success: true,
+      data,
     };
   }
 }

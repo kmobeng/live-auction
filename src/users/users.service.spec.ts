@@ -6,11 +6,9 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
-import type { ConfigService } from '@nestjs/config';
 import { UsersService } from './users.service';
 import type { PrismaService } from '../prisma.service';
 import type { TokenUtils } from '../auth/utils/auth.util';
-import type { OutboxService } from '../outbox/outbox.service';
 import type { TokenStoreService } from '../redis/token-store.service';
 
 const sha256 = (value: string) =>
@@ -23,7 +21,6 @@ const makeUser = (overrides: Record<string, any> = {}) => ({
   password: '$2b$12$storedhash',
   role: 'USER',
   provider: 'local',
-  needToChangePassword: false,
   isEmailVerified: true,
   passwordChangedAt: null,
   createdAt: new Date('2026-01-01T00:00:00Z'),

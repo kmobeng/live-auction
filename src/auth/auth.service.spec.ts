@@ -9,7 +9,6 @@ import type { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import type { PrismaService } from '../prisma.service';
 import type { TokenUtils } from './utils/auth.util';
-import type { OutboxService } from '../outbox/outbox.service';
 import type { RedisService } from '../redis/redis.service';
 import type { TokenStoreService } from '../redis/token-store.service';
 
@@ -23,7 +22,6 @@ const makeUser = (overrides: Record<string, any> = {}) => ({
   password: '$2b$12$storedhash',
   role: 'USER',
   provider: 'local',
-  needToChangePassword: false,
   isEmailVerified: false,
   passwordChangedAt: null,
   createdAt: new Date('2026-01-01T00:00:00Z'),
@@ -69,8 +67,10 @@ describe('AuthService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    jest.spyOn(bcrypt, 'hash').mockResolvedValue('hashed-password');
-    jest.spyOn(bcrypt, 'compare').mockResolvedValue(true);
+    (jest.spyOn(bcrypt, 'hash') as jest.Mock).mockResolvedValue(
+      'hashed-password',
+    );
+    (jest.spyOn(bcrypt, 'compare') as jest.Mock).mockResolvedValue(true);
 
     tx = {
       user: { create: jest.fn(), update: jest.fn() },
@@ -323,7 +323,6 @@ describe('AuthService', () => {
         role: 'USER',
         provider: 'local',
         isEmailVerified: false,
-        needToChangePassword: false,
       });
       expect(tokenUtils.generateRefreshToken).toHaveBeenCalledWith({
         sub: 'user-1',

@@ -50,7 +50,6 @@ describe('TokenUtils', () => {
         role: 'USER',
         provider: 'local',
         isEmailVerified: false,
-        needToChangePassword: false,
       });
 
       const payload = tokenUtils.verifyAccessToken(token);
@@ -60,7 +59,6 @@ describe('TokenUtils', () => {
       expect(payload.role).toBe('USER');
       expect(payload.provider).toBe('local');
       expect(payload.isEmailVerified).toBe(false);
-      expect(payload.needToChangePassword).toBe(false);
       expect(typeof payload.jti).toBe('string');
 
       // jti registry write with the access-token lifetime as TTL
@@ -108,7 +106,6 @@ describe('TokenUtils', () => {
       role: 'USER',
       provider: 'local',
       isEmailVerified: false,
-      needToChangePassword: false,
     });
     const refreshToken = tokenUtils.generateRefreshToken({ sub: 'user-1' });
 

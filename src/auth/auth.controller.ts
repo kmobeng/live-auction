@@ -48,7 +48,6 @@ export class AuthController {
       role: user.role,
       provider: user.provider!,
       isEmailVerified: user.isEmailVerified,
-      needToChangePassword: user.needToChangePassword,
     });
 
     return {
@@ -79,7 +78,6 @@ export class AuthController {
       role: user.role,
       provider: user.provider!,
       isEmailVerified: user.isEmailVerified,
-      needToChangePassword: user.needToChangePassword,
     });
 
     return {
@@ -237,7 +235,6 @@ export class AuthController {
       role: user.role,
       provider: user.provider,
       isEmailVerified: true,
-      needToChangePassword: user.needToChangePassword,
     });
 
     return {
