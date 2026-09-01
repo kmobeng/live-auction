@@ -236,7 +236,7 @@ export class AuctionsService {
     ]);
 
     return {
-      items: items.map((auction) => this.toListItem(auction)),
+      items: items.map((auction) => this.toListItem(auction as any)),
       pagination: this.meta(page, limit, total),
     };
   }
@@ -276,10 +276,10 @@ export class AuctionsService {
         : null,
       serverTime: now.toISOString(),
       timeRemainingMs:
-        auction.status === 'ENDED'
+        auction.status === AuctionStatus.ENDED
           ? 0
           : Math.max(
-              (auction.status === 'UPCOMING'
+              (auction.status === AuctionStatus.UPCOMING
                 ? auction.startTime
                 : auction.endTime
               ).getTime() - now.getTime(),
@@ -309,32 +309,6 @@ export class AuctionsService {
     }
 
     return auction;
-  }
-
-  async joinAuctionService(userId: string, auctionId: string) {
-    const auction = await this.prismaService.auction.findUnique({
-      where: { id: auctionId },
-      select: { id: true, status: true },
-    });
-
-    if (!auction) {
-      throw new NotFoundException('Auction not found');
-    }
-
-    if (auction.status !== AuctionStatus.ACTIVE) {
-      throw new ConflictException(
-        'Auction is not active. You can only join active auctions.',
-      );
-    }
-
-    const participant = await this.prismaService.auctionParticipant.create({
-      data: {
-        userId,
-        auctionId,
-      },
-    });
-
-    return participant;
   }
 
   private toListItem(

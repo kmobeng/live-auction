@@ -123,18 +123,4 @@ export class AuctionsController {
       message: 'Auction deleted successfully',
     };
   }
-
-  @UseGuards(JwtAuthGuard, IsEmailVerifiedGuard)
-  @Post("/join/:id")
-  async joinAuction(
-    @CurrentUser() user: AccessJWTPayload,
-    @Param('id', ParseUUIDPipe) id: string,
-  ) {
-    const data = await this.auctionsService.joinAuctionService(user.sub, id);
-
-    return {
-      success: true,
-      data,
-    };
-  }
 }
