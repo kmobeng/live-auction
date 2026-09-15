@@ -1,4 +1,4 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { BidsGateway } from './bids.gateway';
 import { BidsController } from './bids.controller';
 import { BidsService } from './bids.service';

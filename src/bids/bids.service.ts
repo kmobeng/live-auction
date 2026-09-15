@@ -1,8 +1,10 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Inject,
   Injectable,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma.service';
 import { BidsGateway } from './bids.gateway';
@@ -13,6 +15,7 @@ import { Prisma } from '../../generated/prisma/client';
 export class BidsService {
   constructor(
     private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => BidsGateway))
     private readonly gateway: BidsGateway,
   ) {}
 
@@ -49,8 +52,7 @@ export class BidsService {
       throw new ForbiddenException('You cannot bid on your own auction');
     }
 
-    // WS-only: must be signed in already enforced by JwtAuthGuard, no join gate
-    // Validate amount > currentBid
+    // Fast pre-check before acquiring row lock (authoritative check is inside tx)
     const currentBidValue = auction.currentBid
       ? Number(auction.currentBid)
       : Number(auction.startingBid);
@@ -60,46 +62,88 @@ export class BidsService {
       );
     }
 
-    // Transaction: create bid + update currentBid atomically
-    const result = await this.prisma.$transaction(async (tx) => {
-      // Re-check currentBid inside tx to prevent race (select for update via transaction isolation)
-      const fresh = await tx.auction.findUnique({
-        where: { id: dto.auctionId },
-        select: { currentBid: true, startingBid: true },
-      });
-      const freshCurrent = fresh?.currentBid
-        ? Number(fresh.currentBid)
-        : Number(fresh?.startingBid ?? 0);
-      if (dto.amount <= freshCurrent) {
-        throw new BadRequestException(
-          `Bid must be higher than current bid (${freshCurrent})`,
-        );
-      }
+    // Transaction with row-level locking: SELECT FOR UPDATE on auction row.
+    // This is the centerpiece concurrency control — only one tx can hold the
+    // lock on the same auction at a time, so two simultaneous bids at the
+    // same price cannot both win. Second waiter re-checks and gets rejected.
+    const result = await this.prisma.$transaction(
+      async (tx) => {
+        // Row-level lock (PG). prisma.$queryRaw inside interactive tx keeps same connection.
+        const lockedRows = await tx.$queryRaw<
+          Array<{
+            id: string;
+            sellerId: string;
+            status: string;
+            startTime: Date;
+            endTime: Date;
+            startingBid: any;
+            currentBid: any;
+          }>
+        >`SELECT id, "sellerId", status, "startTime", "endTime", "startingBid", "currentBid" FROM "Auction" WHERE id = ${dto.auctionId} FOR UPDATE`;
 
-      const bid = await tx.bid.create({
-        data: {
-          auctionId: dto.auctionId,
-          userId,
-          amount: new Prisma.Decimal(dto.amount),
-        },
-        include: {
-          user: { select: { id: true, name: true } },
-        },
-      });
+        const locked = lockedRows[0];
+        if (!locked) {
+          throw new NotFoundException('Auction not found');
+        }
 
-      const updatedAuction = await tx.auction.update({
-        where: { id: dto.auctionId },
-        data: { currentBid: new Prisma.Decimal(dto.amount) },
-        select: { currentBid: true, _count: { select: { bids: true } } },
-      });
+        const txNow = new Date();
+        if (
+          locked.status === 'ENDED' ||
+          new Date(locked.endTime).getTime() <= txNow.getTime() ||
+          new Date(locked.startTime).getTime() > txNow.getTime()
+        ) {
+          throw new BadRequestException('Auction is not active');
+        }
+        if (locked.sellerId === userId) {
+          throw new ForbiddenException('You cannot bid on your own auction');
+        }
 
-      return { bid, updatedAuction };
-    });
+        const freshCurrent = locked.currentBid
+          ? Number(locked.currentBid)
+          : Number(locked.startingBid ?? 0);
+        if (dto.amount <= freshCurrent) {
+          throw new BadRequestException(
+            `Bid must be higher than current bid (${freshCurrent})`,
+          );
+        }
+
+        // Capture previous top bidder before insert — for targeted outbid push
+        const previousTop = await tx.bid.findFirst({
+          where: { auctionId: dto.auctionId },
+          orderBy: [{ amount: 'desc' }, { createdAt: 'desc' }],
+          select: {
+            userId: true,
+            amount: true,
+            user: { select: { name: true } },
+          },
+        });
+
+        const bid = await tx.bid.create({
+          data: {
+            auctionId: dto.auctionId,
+            userId,
+            amount: new Prisma.Decimal(dto.amount),
+          },
+          include: {
+            user: { select: { id: true, name: true } },
+          },
+        });
+
+        const updatedAuction = await tx.auction.update({
+          where: { id: dto.auctionId },
+          data: { currentBid: new Prisma.Decimal(dto.amount) },
+          select: { currentBid: true, _count: { select: { bids: true } } },
+        });
+
+        return { bid, updatedAuction, previousTop };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted },
+    );
 
     const bid = result.bid;
     const bidCount = result.updatedAuction._count.bids;
 
-    // Emit WS after DB commit succeeded
+    // Emit WS after DB commit succeeded — broadcast to auction room
     this.gateway.emitBidCreated(dto.auctionId, {
       id: bid.id,
       amount: bid.amount,
@@ -109,6 +153,19 @@ export class BidsService {
       currentBid: result.updatedAuction.currentBid,
       bidCount,
     });
+
+    // Targeted outbid push — only previous top bidder, not all watchers
+    const prev = result.previousTop as any;
+    if (prev && prev.userId !== userId) {
+      this.gateway.emitOutbid(prev.userId, {
+        auctionId: dto.auctionId,
+        message: "you've been outbid",
+        previousAmount: prev.amount,
+        newAmount: dto.amount,
+        newBidderId: userId,
+        newBidderName: (bid as any).user?.name ?? null,
+      });
+    }
 
     return {
       id: bid.id,

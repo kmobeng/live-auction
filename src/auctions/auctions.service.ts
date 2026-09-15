@@ -20,17 +20,24 @@ export class AuctionsService {
   constructor(private readonly prismaService: PrismaService) {}
 
   async createAuctionService(sellerId: string, dto: CreateAuctionDto) {
-    // Validate start and end times
+    // Validate start and end times — allow startTime == now for immediate ACTIVE auctions (demo requirement)
     const startTime = new Date(dto.startTime);
     const endTime = new Date(dto.endTime);
+    const now = Date.now();
 
-    if (startTime.getTime() <= Date.now()) {
-      throw new BadRequestException('Start time must be in the future');
+    // Allow past/now startTime; only endTime must be in future and after start
+    if (endTime.getTime() <= now) {
+      throw new BadRequestException('End time must be in the future');
     }
 
     if (endTime.getTime() <= startTime.getTime()) {
       throw new BadRequestException('End time must be after start time');
     }
+
+    const status: AuctionStatus =
+      startTime.getTime() <= now && endTime.getTime() > now
+        ? 'ACTIVE'
+        : 'UPCOMING';
 
     const auction = await this.prismaService.auction.create({
       data: {
@@ -41,6 +48,7 @@ export class AuctionsService {
         sellerId,
         startTime,
         endTime,
+        status,
       },
     });
 

@@ -6,11 +6,24 @@ import {
   WebSocketServer,
   WsException,
 } from '@nestjs/websockets';
-import { Logger, UseGuards } from '@nestjs/common';
+import {
+  Inject,
+  Logger,
+  UseFilters,
+  UseGuards,
+  UsePipes,
+  ValidationPipe,
+  forwardRef,
+} from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { WsJwtGuard } from '../common/guards/ws-jwt.guard';
 import { PrismaService } from '../prisma.service';
 import { AuctionStatus } from '../../generated/prisma/enums';
+import { WsCurrentUser } from '../common/decorators/ws-current-user.decorator';
+import type { AccessJWTPayload } from '../common/interfaces/jwt.interface';
+import { WsExceptionFilter } from '../common/filters/ws-exception.filter';
+import { BidsService } from './bids.service';
+import { CreateBidDto } from './dto/create-bid.dto';
 
 function isUUID(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
@@ -34,6 +47,7 @@ type LiveState = {
   timeRemainingMs: number;
 } | null;
 
+@UseFilters(WsExceptionFilter)
 @WebSocketGateway({
   cors: {
     origin: '*',
@@ -46,14 +60,49 @@ export class BidsGateway {
   @WebSocketServer()
   server!: Server;
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(forwardRef(() => BidsService))
+    private readonly bidsService: BidsService,
+  ) {}
 
   handleConnection(client: Socket) {
     this.logger.log(`Client connected: ${client.id}`);
+    // Personal room for outbid pushes is joined lazily on first authenticated message (joinAuction / placeBid)
+    // so we don't require auth at handshake. If token was sent in handshake we can pre-join:
+    const user = (client as any).data?.user as AccessJWTPayload | undefined;
+    if (user?.sub) {
+      void client.join(this.userRoomName(user.sub));
+    }
   }
 
   handleDisconnect(client: Socket) {
     this.logger.log(`Client disconnected: ${client.id}`);
+    // Socket.IO auto-removes client from rooms, but we need to notify remaining watchers
+    // about updated participant counts for every auction room this socket was in.
+    // Sids map may already be cleaned, so we track via server adapter before removal is complete
+    // — best effort: iterate known auction rooms derived from current adapter state is insufficient after leave.
+    // Fallback: broadcast is not emitted here; counts are corrected on next join/leave.
+    // We attempt to find auction rooms the socket belonged to via a lightweight scan.
+    if (!this.server) return;
+    try {
+      const rooms = (client as any).rooms as Set<string> | undefined;
+      if (rooms) {
+        for (const room of rooms) {
+          if (room.startsWith('auction:')) {
+            const auctionId = room.slice('auction:'.length);
+            // client already left, get size after leave
+            const participantCount = this.getRoomSize(auctionId);
+            this.server.to(room).emit('auction:participantCount', {
+              auctionId,
+              participantCount,
+            });
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
   }
 
   @UseGuards(WsJwtGuard)
@@ -96,6 +145,8 @@ export class BidsGateway {
 
     const room = this.roomName(auctionId);
     await client.join(room);
+    // Ensure personal outbid room exists
+    await client.join(this.userRoomName(user.sub));
     this.logger.log(`User ${user.sub} joined room ${room}`);
 
     const fullAuction = await this.prisma.auction.findUnique({
@@ -153,18 +204,44 @@ export class BidsGateway {
       auctionId,
       participantCount,
     });
+    // Broadcast participant joined event to room (excluding joiner)
     client.to(room).emit('participant:joined:ws', {
       auctionId,
       userId: user.sub,
     });
 
+    // Send live state to the joiner
     return { event: 'joined', data: liveState };
+  }
+
+  @UseGuards(WsJwtGuard)
+  @UsePipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  )
+  @SubscribeMessage('placeBid')
+  async handlePlaceBid(
+    @MessageBody() dto: CreateBidDto,
+    @WsCurrentUser() user: AccessJWTPayload,
+    @ConnectedSocket() client: Socket,
+  ) {
+    if (!user?.sub) throw new WsException('Unauthorized');
+    // Ensure personal room for outbid before bid
+    await client.join(this.userRoomName(user.sub));
+    // Delegate to service which handles FOR UPDATE locking + broadcasts
+    const result = await this.bidsService.createBidService(user.sub, dto);
+    // Return ack to bidder (also broadcast already sent)
+    return { event: 'bid:placed', data: result };
   }
 
   @UseGuards(WsJwtGuard)
   @SubscribeMessage('leaveAuction')
   async handleLeaveAuction(
     @MessageBody() data: { auctionId: string },
+    @WsCurrentUser() user: AccessJWTPayload,
     @ConnectedSocket() client: Socket,
   ) {
     const auctionId = data?.auctionId;
@@ -179,11 +256,16 @@ export class BidsGateway {
       auctionId,
       participantCount,
     });
+    // Broadcast participant left event to room (excluding leaver)
+    client.to(room).emit('participant:left:ws', {
+      auctionId,
+      userId: user.sub,
+    });
     return { event: 'left', data: { auctionId, participantCount } };
   }
 
   getRoomSize(auctionId: string): number {
-    if (!this.server) return 0;
+    if (!this.server) return 0; // If the server is not available, return 0
     const room = this.roomName(auctionId);
     return this.server.sockets.adapter.rooms.get(room)?.size ?? 0;
   }
@@ -210,6 +292,26 @@ export class BidsGateway {
     });
   }
 
+  emitOutbid(
+    outbidUserId: string,
+    payload: {
+      auctionId: string;
+      message: string;
+      previousAmount: any;
+      newAmount: any;
+      newBidderId: string;
+      newBidderName?: string | null;
+    },
+  ) {
+    if (!this.server) return;
+    // Personal room — only previous top bidder receives this
+    this.server.to(this.userRoomName(outbidUserId)).emit('bid:outbid', payload);
+    // Also emit legacy alias per spec wording "you have been outbid"
+    this.server
+      .to(this.userRoomName(outbidUserId))
+      .emit('you have been outbid', payload);
+  }
+
   emitAuctionEnded(auctionId: string, payload: Record<string, any>) {
     if (!this.server) return;
     this.server.to(this.roomName(auctionId)).emit('auction:ended', payload);
@@ -217,5 +319,9 @@ export class BidsGateway {
 
   private roomName(auctionId: string): string {
     return `auction:${auctionId}`;
+  }
+
+  private userRoomName(userId: string): string {
+    return `user:${userId}`;
   }
 }
