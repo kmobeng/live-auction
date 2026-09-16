@@ -62,13 +62,9 @@ export class BidsService {
       );
     }
 
-    // Transaction with row-level locking: SELECT FOR UPDATE on auction row.
-    // This is the centerpiece concurrency control — only one tx can hold the
-    // lock on the same auction at a time, so two simultaneous bids at the
-    // same price cannot both win. Second waiter re-checks and gets rejected.
+    
     const result = await this.prisma.$transaction(
       async (tx) => {
-        // Row-level lock (PG). prisma.$queryRaw inside interactive tx keeps same connection.
         const lockedRows = await tx.$queryRaw<
           Array<{
             id: string;

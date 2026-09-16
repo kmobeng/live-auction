@@ -17,6 +17,7 @@ import {
 } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { WsJwtGuard } from '../common/guards/ws-jwt.guard';
+import { WsIsEmailVerifiedGuard } from '../common/guards/ws-is-email-verified.guard';
 import { PrismaService } from '../prisma.service';
 import { AuctionStatus } from '../../generated/prisma/enums';
 import { WsCurrentUser } from '../common/decorators/ws-current-user.decorator';
@@ -68,8 +69,7 @@ export class BidsGateway {
 
   handleConnection(client: Socket) {
     this.logger.log(`Client connected: ${client.id}`);
-    // Personal room for outbid pushes is joined lazily on first authenticated message (joinAuction / placeBid)
-    // so we don't require auth at handshake. If token was sent in handshake we can pre-join:
+   
     const user = (client as any).data?.user as AccessJWTPayload | undefined;
     if (user?.sub) {
       void client.join(this.userRoomName(user.sub));
@@ -78,12 +78,7 @@ export class BidsGateway {
 
   handleDisconnect(client: Socket) {
     this.logger.log(`Client disconnected: ${client.id}`);
-    // Socket.IO auto-removes client from rooms, but we need to notify remaining watchers
-    // about updated participant counts for every auction room this socket was in.
-    // Sids map may already be cleaned, so we track via server adapter before removal is complete
-    // — best effort: iterate known auction rooms derived from current adapter state is insufficient after leave.
-    // Fallback: broadcast is not emitted here; counts are corrected on next join/leave.
-    // We attempt to find auction rooms the socket belonged to via a lightweight scan.
+
     if (!this.server) return;
     try {
       const rooms = (client as any).rooms as Set<string> | undefined;
@@ -214,7 +209,7 @@ export class BidsGateway {
     return { event: 'joined', data: liveState };
   }
 
-  @UseGuards(WsJwtGuard)
+  @UseGuards(WsJwtGuard, WsIsEmailVerifiedGuard)
   @UsePipes(
     new ValidationPipe({
       whitelist: true,
