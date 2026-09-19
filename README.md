@@ -96,7 +96,6 @@ Global prefix: `api/v1` (except `/`).
 | `bid:created` | Server → Room | New highest bid to `auction:${id}`. |
 | `auction:currentBid` | Server → Room | Updated price + bid count. |
 | `bid:outbid` | Server → User | Private "you've been outbid" to previous highest bidder (`user:${prevId}`). |
-| `you have been outbid` | Server → User | Alias of the above, same payload. |
 | `auction:ended` | Server → Room | Winner `{id, name}` + `finalPrice` + `bidCount` on close. |
 | `auction:participantCount` | Server → Room | Watcher count on join/leave. |
 | `exception` | Server → Client | `{status: 'error', message}` on validation/auth/bid failures. |

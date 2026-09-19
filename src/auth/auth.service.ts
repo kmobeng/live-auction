@@ -156,7 +156,7 @@ export class AuthService {
   async refreshTokenService(
     hashRefreshToken: string,
     userId: string,
-  ): Promise<{ accessToken: Promise<string>; refreshToken: string }> {
+  ): Promise<{ accessToken: string; refreshToken: string }> {
     // Check if the refresh token exists and is valid
     const refreshTokenRecord = await this.prismaService.refreshToken.findFirst({
       where: {
@@ -184,7 +184,8 @@ export class AuthService {
       isEmailVerified: refreshTokenRecord.user.isEmailVerified,
     };
 
-    const newAccessToken = this.tokenUtils.generateAccessToken(accessPayload);
+    const newAccessToken =
+      await this.tokenUtils.generateAccessToken(accessPayload);
 
     const newRefreshToken = this.tokenUtils.generateRefreshToken({
       sub: refreshTokenRecord.user.id,

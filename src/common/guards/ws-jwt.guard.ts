@@ -2,8 +2,10 @@ import {
   CanActivate,
   ExecutionContext,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
+import { WsException } from '@nestjs/websockets';
 import { TokenUtils } from '../../auth/utils/auth.util';
 import { RedisService } from '../../redis/redis.service';
 import { Socket } from 'socket.io';
@@ -17,6 +19,8 @@ export interface WsClient extends Socket {
 
 @Injectable()
 export class WsJwtGuard implements CanActivate {
+  private readonly logger = new Logger(WsJwtGuard.name);
+
   constructor(
     private readonly tokenUtils: TokenUtils,
     private readonly redisService: RedisService,
@@ -27,19 +31,41 @@ export class WsJwtGuard implements CanActivate {
     const token = this.extractToken(client);
 
     if (!token) {
-      throw new UnauthorizedException('Access token is missing');
+      // Must be WsException (not UnauthorizedException): the WS exception
+      // pipeline only maps WsException to a clean client message, anything
+      // else surfaces as a generic "Internal server error".
+      throw new WsException('Access token is missing');
     }
 
-    const payload = this.tokenUtils.verifyAccessToken(token);
+    let payload: AccessJWTPayload;
+    try {
+      payload = this.tokenUtils.verifyAccessToken(token);
+    } catch (error) {
+      if (error instanceof WsException) throw error;
+      const message =
+        error instanceof UnauthorizedException
+          ? error.message
+          : 'Invalid or expired access token';
+      throw new WsException(message);
+    }
 
     if (payload.jti) {
-      const isBlacklisted = await this.redisService
-        .getClient()
-        .get(`blacklist:${payload.jti}`);
-      if (isBlacklisted) {
-        throw new UnauthorizedException(
-          'Session has expired. Please log in again.',
+      let isBlacklisted: string | null;
+      try {
+        isBlacklisted = await this.redisService
+          .getClient()
+          .get(`blacklist:${payload.jti}`);
+      } catch (error) {
+        this.logger.error(
+          'Redis blacklist check failed during WS auth',
+          (error as Error)?.stack ?? String(error),
         );
+        throw new WsException(
+          'Authentication service temporarily unavailable. Please try again.',
+        );
+      }
+      if (isBlacklisted) {
+        throw new WsException('Session has expired. Please log in again.');
       }
     }
 

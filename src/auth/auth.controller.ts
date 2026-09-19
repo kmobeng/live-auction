@@ -42,7 +42,7 @@ export class AuthController {
     const { refreshToken, ...userWithoutRefreshToken } = user;
 
     this.tokenUtils.sendRefreshToken(res, refreshToken);
-    const token = this.tokenUtils.generateAccessToken({
+    const token = await this.tokenUtils.generateAccessToken({
       sub: user.id,
       email: user.email,
       role: user.role,
@@ -72,7 +72,7 @@ export class AuthController {
 
     this.tokenUtils.sendRefreshToken(res, refreshToken);
 
-    const token = this.tokenUtils.generateAccessToken({
+    const token = await this.tokenUtils.generateAccessToken({
       sub: user.id,
       email: user.email,
       role: user.role,
@@ -229,7 +229,7 @@ export class AuthController {
       user.exp! - Math.floor(Date.now() / 1000),
     );
 
-    const newToken = this.tokenUtils.generateAccessToken({
+    const newToken = await this.tokenUtils.generateAccessToken({
       sub: user.sub,
       email: user.email,
       role: user.role,

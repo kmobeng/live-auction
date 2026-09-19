@@ -30,6 +30,31 @@ function isUUID(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
+/**
+ * Normalizes the incoming `auctionId` from a WS payload.
+ *
+ * - Accepts the payload as an object (`{ auctionId }`) or as a
+ *   stringified-JSON payload (some Socket.IO clients / Postman Text mode
+ *   deliver the body as a string).
+ * - Trims surrounding whitespace (copy-pasted IDs often carry a trailing
+ *   space or newline, which breaks the anchored UUID check).
+ * - Returns `undefined` when no usable ID can be extracted.
+ */
+function normalizeAuctionId(data: unknown): string | undefined {
+  let payload: unknown = data;
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      return undefined;
+    }
+  }
+  const auctionId = (payload as { auctionId?: unknown } | null)?.auctionId;
+  if (typeof auctionId !== 'string') return undefined;
+  const trimmed = auctionId.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 type LiveState = {
   id: string;
   title: string;
@@ -69,7 +94,7 @@ export class BidsGateway {
 
   handleConnection(client: Socket) {
     this.logger.log(`Client connected: ${client.id}`);
-   
+
     const user = (client as any).data?.user as AccessJWTPayload | undefined;
     if (user?.sub) {
       void client.join(this.userRoomName(user.sub));
@@ -106,8 +131,12 @@ export class BidsGateway {
     @MessageBody() data: { auctionId: string },
     @ConnectedSocket() client: Socket,
   ) {
-    const auctionId = data?.auctionId;
+    const auctionId = normalizeAuctionId(data);
     if (!auctionId || !isUUID(auctionId)) {
+      this.logger.warn(
+        `joinAuction rejected: invalid auctionId (received ${typeof data}, ` +
+          `preview: ${JSON.stringify(data)?.slice(0, 60)})`,
+      );
       throw new WsException('Invalid auctionId');
     }
 
@@ -239,8 +268,12 @@ export class BidsGateway {
     @WsCurrentUser() user: AccessJWTPayload,
     @ConnectedSocket() client: Socket,
   ) {
-    const auctionId = data?.auctionId;
+    const auctionId = normalizeAuctionId(data);
     if (!auctionId || !isUUID(auctionId)) {
+      this.logger.warn(
+        `leaveAuction rejected: invalid auctionId (received ${typeof data}, ` +
+          `preview: ${JSON.stringify(data)?.slice(0, 60)})`,
+      );
       throw new WsException('Invalid auctionId');
     }
     const room = this.roomName(auctionId);
@@ -301,10 +334,6 @@ export class BidsGateway {
     if (!this.server) return;
     // Personal room — only previous top bidder receives this
     this.server.to(this.userRoomName(outbidUserId)).emit('bid:outbid', payload);
-    // Also emit legacy alias per spec wording "you have been outbid"
-    this.server
-      .to(this.userRoomName(outbidUserId))
-      .emit('you have been outbid', payload);
   }
 
   emitAuctionEnded(auctionId: string, payload: Record<string, any>) {
