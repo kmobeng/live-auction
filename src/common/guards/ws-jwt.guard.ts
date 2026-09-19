@@ -17,6 +17,35 @@ export interface WsClient extends Socket {
   };
 }
 
+/**
+ * Extracts the access token from a Socket.IO handshake, checking (in order):
+ * handshake auth payload, Authorization header, query params. Shared with
+ * BidsGateway so connection-time room joins use the exact same sources.
+ */
+export function extractWsToken(client: Socket): string | undefined {
+  // 1. Check handshake auth
+  const authToken = (client.handshake.auth as any)?.token;
+  if (typeof authToken === 'string' && authToken.length > 0) {
+    return authToken.startsWith('Bearer ')
+      ? authToken.split(' ')[1]
+      : authToken;
+  }
+
+  // 2. Check handshake headers
+  const header = client.handshake.headers.authorization;
+  if (typeof header === 'string' && header.startsWith('Bearer ')) {
+    return header.split(' ')[1];
+  }
+
+  // 3. Check handshake query parameters
+  const queryToken = (client.handshake.query as any)?.token;
+  if (typeof queryToken === 'string' && queryToken.length > 0) {
+    return queryToken;
+  }
+
+  return undefined;
+}
+
 @Injectable()
 export class WsJwtGuard implements CanActivate {
   private readonly logger = new Logger(WsJwtGuard.name);
@@ -77,26 +106,6 @@ export class WsJwtGuard implements CanActivate {
   }
 
   private extractToken(client: Socket): string | undefined {
-    // 1. Check handshake auth
-    const authToken = (client.handshake.auth as any)?.token;
-    if (typeof authToken === 'string' && authToken.length > 0) {
-      return authToken.startsWith('Bearer ')
-        ? authToken.split(' ')[1]
-        : authToken;
-    }
-
-    // 2. Check handshake headers
-    const header = client.handshake.headers.authorization;
-    if (typeof header === 'string' && header.startsWith('Bearer ')) {
-      return header.split(' ')[1];
-    }
-
-    // 3. Check handshake query parameters
-    const queryToken = (client.handshake.query as any)?.token;
-    if (typeof queryToken === 'string' && queryToken.length > 0) {
-      return queryToken;
-    }
-
-    return undefined;
+    return extractWsToken(client);
   }
 }

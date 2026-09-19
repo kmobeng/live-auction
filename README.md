@@ -25,7 +25,7 @@ Bidding is WebSocket-only. Concurrent bids on the same auction are serialized wi
 - **Auctions** — Create, browse, and manage timed auctions with live state (current bid, bid count, participants, time remaining).
 - **Live bidding** — WebSocket-only `placeBid`. Rules enforced server-side: auction must be `ACTIVE` by time window, bidder can't be the seller, email must be verified, and `amount` must beat the current highest (≥ 0.01).
 - **Live updates** — New highest bid (`bid:created`), current price (`auction:currentBid`), and watcher count (`auction:participantCount`) broadcast instantly to room `auction:${id}`.
-- **Targeted outbid notifications** — Only the previous highest bidder receives a private `bid:outbid` push in their personal `user:${id}` room.
+- **Targeted outbid notifications** — Only the previous highest bidder receives a private `bid:outbid` push in their personal `user:${id}` room (self-outbids notify too).
 - **Automatic lifecycle** — A 30-second cron flips `UPCOMING → ACTIVE → ENDED`, derives the winner from the last bid, and emits `auction:ended {winner, finalPrice, bidCount}`.
 - **Access control** — Only the seller (or an admin) can update or delete an auction, and only before any bids exist and before it starts.
 

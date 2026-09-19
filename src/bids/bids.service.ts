@@ -62,7 +62,6 @@ export class BidsService {
       );
     }
 
-    
     const result = await this.prisma.$transaction(
       async (tx) => {
         const lockedRows = await tx.$queryRaw<
@@ -150,9 +149,11 @@ export class BidsService {
       bidCount,
     });
 
-    // Targeted outbid push — only previous top bidder, not all watchers
+    // Targeted outbid push — previous top bidder, not all watchers.
+    // Self-outbids notify too: raising your own top still changes the price
+    // everyone else must beat, and single-account test clients rely on it.
     const prev = result.previousTop as any;
-    if (prev && prev.userId !== userId) {
+    if (prev) {
       this.gateway.emitOutbid(prev.userId, {
         auctionId: dto.auctionId,
         message: "you've been outbid",

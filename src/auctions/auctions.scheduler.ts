@@ -7,6 +7,12 @@ import { BidsGateway } from '../bids/bids.gateway';
 export class AuctionsScheduler {
   private readonly logger = new Logger(AuctionsScheduler.name);
 
+  // IDs already announced via auction:ended in this process. Prevents
+  // re-broadcasting old ENDED auctions on every tick while still letting a
+  // missed close through on the next tick (ids are only added after a
+  // successful emit).
+  private readonly announcedEnded = new Set<string>();
+
   constructor(
     private readonly prismaService: PrismaService,
     @Inject(forwardRef(() => BidsGateway))
@@ -41,37 +47,40 @@ export class AuctionsScheduler {
         );
       }
 
-      // Broadcast auction:ended for each auction that just closed.
-      // We derive winner from last bid (highest) — no winnerId column.
-      if (endedResult.count > 0) {
-        const recentlyEnded = await this.prismaService.auction.findMany({
-          where: {
-            status: 'ENDED',
-            endTime: { lte: now },
-            // only those updated very recently to avoid re-broadcasting old ENDED
-            updatedAt: { gte: new Date(now.getTime() - 60_000) },
-          },
-          select: {
-            id: true,
-            title: true,
-            currentBid: true,
-            endTime: true,
-            bids: {
-              orderBy: [{ amount: 'desc' }, { createdAt: 'desc' }],
-              take: 1,
-              select: {
-                amount: true,
-                user: { select: { id: true, name: true } },
-                createdAt: true,
-              },
+      // Broadcast auction:ended for every auction that is closed but may not
+      // have been announced yet. Unlike the previous updatedAt-window
+      // heuristic, this re-selects all ENDED auctions past their endTime, so
+      // a close missed by one tick is picked up by the next instead of going
+      // silent forever. We derive winner from last bid (highest) — no
+      // winnerId column.
+      const closedUnannounced = await this.prismaService.auction.findMany({
+        where: {
+          status: 'ENDED',
+          endTime: { lte: now },
+        },
+        select: {
+          id: true,
+          title: true,
+          currentBid: true,
+          endTime: true,
+          bids: {
+            orderBy: [{ amount: 'desc' }, { createdAt: 'desc' }],
+            take: 1,
+            select: {
+              amount: true,
+              user: { select: { id: true, name: true } },
+              createdAt: true,
             },
-            _count: { select: { bids: true } },
           },
-        });
+          _count: { select: { bids: true } },
+        },
+      });
 
-        for (const auction of recentlyEnded) {
+      for (const auction of closedUnannounced) {
+        if (this.announcedEnded.has(auction.id)) continue;
+        try {
           const top = (auction as any).bids?.[0] ?? null;
-          this.bidsGateway.emitAuctionEnded(auction.id, {
+          const emitted = this.bidsGateway.emitAuctionEnded(auction.id, {
             auctionId: auction.id,
             title: (auction as any).title,
             winner: top ? top.user : null,
@@ -79,6 +88,14 @@ export class AuctionsScheduler {
             bidCount: (auction as any)._count.bids,
             endedAt: (auction as any).endTime,
           });
+          // Only mark announced on success — a failed emit is retried next tick.
+          if (emitted) this.announcedEnded.add(auction.id);
+        } catch (err) {
+          // One bad row must not abort the rest of the batch.
+          this.logger.error(
+            `Failed to broadcast auction:ended for auction ${auction.id}: ` +
+              `${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
     } catch (err) {

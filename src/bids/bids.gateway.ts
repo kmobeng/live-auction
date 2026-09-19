@@ -16,9 +16,11 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
-import { WsJwtGuard } from '../common/guards/ws-jwt.guard';
+import { WsJwtGuard, extractWsToken } from '../common/guards/ws-jwt.guard';
 import { WsIsEmailVerifiedGuard } from '../common/guards/ws-is-email-verified.guard';
 import { PrismaService } from '../prisma.service';
+import { TokenUtils } from '../auth/utils/auth.util';
+import { RedisService } from '../redis/redis.service';
 import { AuctionStatus } from '../../generated/prisma/enums';
 import { WsCurrentUser } from '../common/decorators/ws-current-user.decorator';
 import type { AccessJWTPayload } from '../common/interfaces/jwt.interface';
@@ -27,19 +29,11 @@ import { BidsService } from './bids.service';
 import { CreateBidDto } from './dto/create-bid.dto';
 
 function isUUID(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    value,
+  );
 }
 
-/**
- * Normalizes the incoming `auctionId` from a WS payload.
- *
- * - Accepts the payload as an object (`{ auctionId }`) or as a
- *   stringified-JSON payload (some Socket.IO clients / Postman Text mode
- *   deliver the body as a string).
- * - Trims surrounding whitespace (copy-pasted IDs often carry a trailing
- *   space or newline, which breaks the anchored UUID check).
- * - Returns `undefined` when no usable ID can be extracted.
- */
 function normalizeAuctionId(data: unknown): string | undefined {
   let payload: unknown = data;
   if (typeof payload === 'string') {
@@ -90,14 +84,36 @@ export class BidsGateway {
     private readonly prisma: PrismaService,
     @Inject(forwardRef(() => BidsService))
     private readonly bidsService: BidsService,
+    private readonly tokenUtils: TokenUtils,
+    private readonly redisService: RedisService,
   ) {}
 
-  handleConnection(client: Socket) {
+  async handleConnection(client: Socket) {
     this.logger.log(`Client connected: ${client.id}`);
 
-    const user = (client as any).data?.user as AccessJWTPayload | undefined;
-    if (user?.sub) {
-      void client.join(this.userRoomName(user.sub));
+    // Best-effort: join the personal outbid room straight at connect so a
+    // reconnected socket is reachable again without re-emitting joinAuction
+    // (rooms don't survive reconnects). Auth failures here only skip the
+    // join — they never throw, since per-event WsJwtGuard remains the
+    // authority for access control.
+    try {
+      const token = extractWsToken(client);
+      if (!token) return;
+      const payload = this.tokenUtils.verifyAccessToken(token);
+      if (payload.jti) {
+        const blacklisted = await this.redisService
+          .getClient()
+          .get(`blacklist:${payload.jti}`);
+        if (blacklisted) return;
+      }
+      (client as any).data = (client as any).data || {};
+      (client as any).data.user = payload;
+      await client.join(this.userRoomName(payload.sub));
+    } catch (err) {
+      this.logger.warn(
+        `Client ${client.id} connected without personal room: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
@@ -331,14 +347,32 @@ export class BidsGateway {
       newBidderName?: string | null;
     },
   ) {
-    if (!this.server) return;
+    if (!this.server) {
+      this.logger.warn(
+        `bid:outbid NOT sent to user ${outbidUserId}: socket server not initialized`,
+      );
+      return;
+    }
     // Personal room — only previous top bidder receives this
-    this.server.to(this.userRoomName(outbidUserId)).emit('bid:outbid', payload);
+    const room = this.userRoomName(outbidUserId);
+    const size = this.server.sockets.adapter.rooms.get(room)?.size ?? 0;
+    if (size === 0) {
+      this.logger.warn(
+        `bid:outbid for user ${outbidUserId} has no listeners (room ${room} is empty — victim may have reconnected without rejoining)`,
+      );
+    }
+    this.server.to(room).emit('bid:outbid', payload);
   }
 
-  emitAuctionEnded(auctionId: string, payload: Record<string, any>) {
-    if (!this.server) return;
+  emitAuctionEnded(auctionId: string, payload: Record<string, any>): boolean {
+    if (!this.server) {
+      this.logger.warn(
+        `auction:ended NOT broadcast for auction ${auctionId}: socket server not initialized`,
+      );
+      return false;
+    }
     this.server.to(this.roomName(auctionId)).emit('auction:ended', payload);
+    return true;
   }
 
   private roomName(auctionId: string): string {
