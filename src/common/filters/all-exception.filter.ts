@@ -53,7 +53,6 @@ export class AllExceptionsFilter implements ExceptionFilter {
   }
 
   private resolveError(exception: unknown): ErrorResponse {
-    // Known NestJS HTTP exceptions
     if (exception instanceof HttpException) {
       const response = exception.getResponse();
       const message =
@@ -67,7 +66,6 @@ export class AllExceptionsFilter implements ExceptionFilter {
       };
     }
 
-    // Prisma: unique constraint violation (e.g. duplicate email)
     if (exception instanceof Prisma.PrismaClientKnownRequestError) {
       if (exception.code === 'P2002') {
         const field =
@@ -87,7 +85,6 @@ export class AllExceptionsFilter implements ExceptionFilter {
       }
     }
 
-    // Anything else — genuinely unexpected
     return {
       statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
       errorMessage: 'Internal server error',

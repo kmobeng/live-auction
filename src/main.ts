@@ -9,10 +9,10 @@ async function bootstrap() {
 
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: true, // Automatically strip properties that do not have any decorators
-      forbidNonWhitelisted: true, // Throw an error if non-whitelisted properties are present
-      transform: true, // Automatically transform payloads to be objects typed according to their DTO classes
-      disableErrorMessages: process.env.NODE_ENV === 'production', // Disable detailed error messages in production for security reasons
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      disableErrorMessages: process.env.NODE_ENV === 'production',
     }),
   );
 

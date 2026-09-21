@@ -157,7 +157,6 @@ export class AuthService {
     hashRefreshToken: string,
     userId: string,
   ): Promise<{ accessToken: string; refreshToken: string }> {
-    // Check if the refresh token exists and is valid
     const refreshTokenRecord = await this.prismaService.refreshToken.findFirst({
       where: {
         token: hashRefreshToken,
@@ -175,7 +174,6 @@ export class AuthService {
       throw new ConflictException('Invalid or expired refresh token');
     }
 
-    // Generate new access and refresh tokens
     const accessPayload = {
       sub: refreshTokenRecord.user.id,
       email: refreshTokenRecord.user.email,
@@ -191,7 +189,6 @@ export class AuthService {
       sub: refreshTokenRecord.user.id,
     });
 
-    // Hash the new refresh token before storing it
     const newHashedRefreshToken = crypto
       .createHash('sha256')
       .update(newRefreshToken)
@@ -247,7 +244,6 @@ export class AuthService {
     remainingTTl: number,
     jti: string,
   ): Promise<void> {
-    // Blacklist every live access token for this user across all devices
     await this.tokenUtils.revokeAllAccessTokens(userId);
 
     await this.prismaService.refreshToken.deleteMany({
@@ -262,7 +258,6 @@ export class AuthService {
   }
 
   async forgotPasswordService(email: string): Promise<void> {
-    // Check if the user exists
     const user = await this.prismaService.user.findUnique({
       where: { email },
     });
@@ -271,7 +266,6 @@ export class AuthService {
       return;
     }
 
-    // Generate a random token for the reset link
     const token = crypto.randomBytes(32).toString('hex');
     const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
 
@@ -296,8 +290,6 @@ export class AuthService {
   }
 
   async resetPasswordService(token: string, password: string): Promise<void> {
-    // The controller passes the already-hashed URL token; the store is keyed
-    // by that hash and returns the owning userId
     const userId = await this.tokenStoreService.consumePasswordReset(token);
 
     if (!userId) {

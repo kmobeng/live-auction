@@ -46,9 +46,6 @@ describe('AuctionsScheduler', () => {
   });
 
   it('still broadcasts an already-ENDED auction with stale updatedAt (the missed-tick regression)', async () => {
-    // Under the old updatedAt-window heuristic this row was never selected,
-    // so the close went silent forever. The new logic selects every ENDED
-    // auction past its endTime regardless of updatedAt.
     const stale = {
       ...endedAuction(),
       endTime: new Date(Date.now() - 24 * 3_600_000),

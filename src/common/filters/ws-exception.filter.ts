@@ -18,15 +18,12 @@ export class WsExceptionFilter extends BaseWsExceptionFilter {
         status: 'error',
         message,
       });
-      // also call parent for logging if needed
       super.catch(exception, host);
       return;
     }
 
     if (exception instanceof HttpException) {
-      // HTTP exceptions (e.g. UnauthorizedException from verifyAccessToken,
-      // ThrottlerException from the global throttler guard) are not WsExceptions,
-      // so without this mapping the client only sees "Internal server error".
+      // Non-Ws exceptions would otherwise reach the client as "Internal server error".
       const response = exception.getResponse();
       const rawMessage =
         typeof response === 'string'

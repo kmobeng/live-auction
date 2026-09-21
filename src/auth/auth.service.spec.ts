@@ -178,7 +178,6 @@ describe('AuthService', () => {
         },
       });
 
-      // the code issued up front belongs to the account being created
       const [issuedUserId, issuedHash] =
         tokenStore.issueEmailVerificationCode.mock.calls[0];
       expect(issuedUserId).toBe(createdId);
@@ -437,7 +436,6 @@ describe('AuthService', () => {
       expect(outboxParams.payload.email).toBe(user.email);
       expect(issuedHash).toBe(sha256(outboxParams.payload.resetToken));
 
-      // single database statement - no transaction wrapper anymore
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 

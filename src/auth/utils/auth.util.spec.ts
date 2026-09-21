@@ -61,7 +61,6 @@ describe('TokenUtils', () => {
       expect(payload.isEmailVerified).toBe(false);
       expect(typeof payload.jti).toBe('string');
 
-      // jti registry write with the access-token lifetime as TTL
       expect(client.sadd).toHaveBeenCalledWith(
         'active-jtis:user-1',
         payload.jti,

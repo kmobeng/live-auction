@@ -17,13 +17,8 @@ export interface WsClient extends Socket {
   };
 }
 
-/**
- * Extracts the access token from a Socket.IO handshake, checking (in order):
- * handshake auth payload, Authorization header, query params. Shared with
- * BidsGateway so connection-time room joins use the exact same sources.
- */
+/** Extracts the access token from a Socket.IO handshake (auth, header, or query). */
 export function extractWsToken(client: Socket): string | undefined {
-  // 1. Check handshake auth
   const authToken = (client.handshake.auth as any)?.token;
   if (typeof authToken === 'string' && authToken.length > 0) {
     return authToken.startsWith('Bearer ')
@@ -31,13 +26,11 @@ export function extractWsToken(client: Socket): string | undefined {
       : authToken;
   }
 
-  // 2. Check handshake headers
   const header = client.handshake.headers.authorization;
   if (typeof header === 'string' && header.startsWith('Bearer ')) {
     return header.split(' ')[1];
   }
 
-  // 3. Check handshake query parameters
   const queryToken = (client.handshake.query as any)?.token;
   if (typeof queryToken === 'string' && queryToken.length > 0) {
     return queryToken;
@@ -60,9 +53,7 @@ export class WsJwtGuard implements CanActivate {
     const token = this.extractToken(client);
 
     if (!token) {
-      // Must be WsException (not UnauthorizedException): the WS exception
-      // pipeline only maps WsException to a clean client message, anything
-      // else surfaces as a generic "Internal server error".
+      // Non-Ws exceptions surface as generic "Internal server error".
       throw new WsException('Access token is missing');
     }
 
@@ -98,7 +89,6 @@ export class WsJwtGuard implements CanActivate {
       }
     }
 
-    // Attach user to socket for handlers
     client.data = client.data || {};
     client.data.user = payload;
 

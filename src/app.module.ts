@@ -26,7 +26,7 @@ import { BidsModule } from './bids/bids.module';
     ThrottlerModule.forRoot({
       throttlers: [
         {
-          ttl: 60 * 1000, //1 minute
+          ttl: 60 * 1000,
           limit: 200,
         },
       ],

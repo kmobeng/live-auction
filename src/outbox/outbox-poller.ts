@@ -76,7 +76,6 @@ export class OutboxPoller {
         });
         break;
       case 'email-change-requested':
-        // Code goes to the NEW address; the old address gets a security notice
         await this.notificationService.enqueueEmailVerification({
           to: event.payload.email,
           token: event.payload.token,

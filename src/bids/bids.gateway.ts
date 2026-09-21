@@ -91,11 +91,7 @@ export class BidsGateway {
   async handleConnection(client: Socket) {
     this.logger.log(`Client connected: ${client.id}`);
 
-    // Best-effort: join the personal outbid room straight at connect so a
-    // reconnected socket is reachable again without re-emitting joinAuction
-    // (rooms don't survive reconnects). Auth failures here only skip the
-    // join — they never throw, since per-event WsJwtGuard remains the
-    // authority for access control.
+    // Best-effort personal room join; per-event guards remain authoritative.
     try {
       const token = extractWsToken(client);
       if (!token) return;
@@ -108,7 +104,11 @@ export class BidsGateway {
       }
       (client as any).data = (client as any).data || {};
       (client as any).data.user = payload;
-      await client.join(this.userRoomName(payload.sub));
+      const personalRoom = this.userRoomName(payload.sub);
+      await client.join(personalRoom);
+      this.logger.log(
+        `Client ${client.id} joined personal room ${personalRoom}`,
+      );
     } catch (err) {
       this.logger.warn(
         `Client ${client.id} connected without personal room: ` +
@@ -127,7 +127,6 @@ export class BidsGateway {
         for (const room of rooms) {
           if (room.startsWith('auction:')) {
             const auctionId = room.slice('auction:'.length);
-            // client already left, get size after leave
             const participantCount = this.getRoomSize(auctionId);
             this.server.to(room).emit('auction:participantCount', {
               auctionId,
@@ -137,7 +136,7 @@ export class BidsGateway {
         }
       }
     } catch {
-      // ignore
+      // ignore disconnect-room errors
     }
   }
 
@@ -185,7 +184,6 @@ export class BidsGateway {
 
     const room = this.roomName(auctionId);
     await client.join(room);
-    // Ensure personal outbid room exists
     await client.join(this.userRoomName(user.sub));
     this.logger.log(`User ${user.sub} joined room ${room}`);
 
@@ -239,18 +237,15 @@ export class BidsGateway {
         }
       : null;
 
-    // Broadcast live count to room (including joiner for sync)
     this.server.to(room).emit('auction:participantCount', {
       auctionId,
       participantCount,
     });
-    // Broadcast participant joined event to room (excluding joiner)
     client.to(room).emit('participant:joined:ws', {
       auctionId,
       userId: user.sub,
     });
 
-    // Send live state to the joiner
     return { event: 'joined', data: liveState };
   }
 
@@ -269,11 +264,8 @@ export class BidsGateway {
     @ConnectedSocket() client: Socket,
   ) {
     if (!user?.sub) throw new WsException('Unauthorized');
-    // Ensure personal room for outbid before bid
     await client.join(this.userRoomName(user.sub));
-    // Delegate to service which handles FOR UPDATE locking + broadcasts
     const result = await this.bidsService.createBidService(user.sub, dto);
-    // Return ack to bidder (also broadcast already sent)
     return { event: 'bid:placed', data: result };
   }
 
@@ -300,7 +292,6 @@ export class BidsGateway {
       auctionId,
       participantCount,
     });
-    // Broadcast participant left event to room (excluding leaver)
     client.to(room).emit('participant:left:ws', {
       auctionId,
       userId: user.sub,
@@ -309,7 +300,7 @@ export class BidsGateway {
   }
 
   getRoomSize(auctionId: string): number {
-    if (!this.server) return 0; // If the server is not available, return 0
+    if (!this.server) return 0;
     const room = this.roomName(auctionId);
     return this.server.sockets.adapter.rooms.get(room)?.size ?? 0;
   }
@@ -353,7 +344,6 @@ export class BidsGateway {
       );
       return;
     }
-    // Personal room — only previous top bidder receives this
     const room = this.userRoomName(outbidUserId);
     const size = this.server.sockets.adapter.rooms.get(room)?.size ?? 0;
     if (size === 0) {

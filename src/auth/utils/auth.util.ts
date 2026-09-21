@@ -48,7 +48,7 @@ export class TokenUtils {
       expiresIn: this.configService.get('JWT_EXPIRES_IN'),
     });
 
-    // Track the jti so a password reset / logout-all / email change can blacklist every live access token for this user in one sweep
+    // Track jti for bulk revocation.
     const registryKey = `active-jtis:${payload.sub}`;
     const ttlSeconds = this.accessTtlSeconds();
     const client = this.redisService.getClient();
@@ -127,7 +127,6 @@ export class TokenUtils {
       return DEFAULT_ACCESS_TTL_SECONDS;
     }
 
-    // Parse the TTL string (e.g., "1h", "30m", "1d")
     const match = /^(\d+)\s*([smhd])$/.exec(raw.trim());
     if (!match) {
       return DEFAULT_ACCESS_TTL_SECONDS;

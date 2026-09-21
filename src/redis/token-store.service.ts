@@ -67,7 +67,6 @@ export class TokenStoreService {
     const client = this.client();
     const ownerKey = `reset-pw-owner:${userId}`;
 
-    // Replace-on-request: drop the previous link so only the newest one works
     const previousHash = await client.get(ownerKey);
     if (previousHash) {
       await client.del(`reset-pw:${previousHash}`);

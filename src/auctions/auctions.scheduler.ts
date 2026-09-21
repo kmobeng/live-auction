@@ -7,10 +7,7 @@ import { BidsGateway } from '../bids/bids.gateway';
 export class AuctionsScheduler {
   private readonly logger = new Logger(AuctionsScheduler.name);
 
-  // IDs already announced via auction:ended in this process. Prevents
-  // re-broadcasting old ENDED auctions on every tick while still letting a
-  // missed close through on the next tick (ids are only added after a
-  // successful emit).
+  // Ids are added only after a successful emit, so failures retry next tick.
   private readonly announcedEnded = new Set<string>();
 
   constructor(
@@ -47,12 +44,7 @@ export class AuctionsScheduler {
         );
       }
 
-      // Broadcast auction:ended for every auction that is closed but may not
-      // have been announced yet. Unlike the previous updatedAt-window
-      // heuristic, this re-selects all ENDED auctions past their endTime, so
-      // a close missed by one tick is picked up by the next instead of going
-      // silent forever. We derive winner from last bid (highest) — no
-      // winnerId column.
+      // Announce every unannounced ENDED auction; winner is the highest bid.
       const closedUnannounced = await this.prismaService.auction.findMany({
         where: {
           status: 'ENDED',
@@ -88,10 +80,8 @@ export class AuctionsScheduler {
             bidCount: (auction as any)._count.bids,
             endedAt: (auction as any).endTime,
           });
-          // Only mark announced on success — a failed emit is retried next tick.
           if (emitted) this.announcedEnded.add(auction.id);
         } catch (err) {
-          // One bad row must not abort the rest of the batch.
           this.logger.error(
             `Failed to broadcast auction:ended for auction ${auction.id}: ` +
               `${err instanceof Error ? err.message : String(err)}`,

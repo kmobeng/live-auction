@@ -39,7 +39,6 @@ export class BidsService {
 
     const now = new Date();
 
-    // Must be ACTIVE by time window
     if (
       auction.status === 'ENDED' ||
       auction.endTime.getTime() <= now.getTime() ||
@@ -52,7 +51,6 @@ export class BidsService {
       throw new ForbiddenException('You cannot bid on your own auction');
     }
 
-    // Fast pre-check before acquiring row lock (authoritative check is inside tx)
     const currentBidValue = auction.currentBid
       ? Number(auction.currentBid)
       : Number(auction.startingBid);
@@ -102,7 +100,6 @@ export class BidsService {
           );
         }
 
-        // Capture previous top bidder before insert — for targeted outbid push
         const previousTop = await tx.bid.findFirst({
           where: { auctionId: dto.auctionId },
           orderBy: [{ amount: 'desc' }, { createdAt: 'desc' }],
@@ -138,7 +135,6 @@ export class BidsService {
     const bid = result.bid;
     const bidCount = result.updatedAuction._count.bids;
 
-    // Emit WS after DB commit succeeded — broadcast to auction room
     this.gateway.emitBidCreated(dto.auctionId, {
       id: bid.id,
       amount: bid.amount,
@@ -149,11 +145,9 @@ export class BidsService {
       bidCount,
     });
 
-    // Targeted outbid push — previous top bidder, not all watchers.
-    // Self-outbids notify too: raising your own top still changes the price
-    // everyone else must beat, and single-account test clients rely on it.
+    // Notify only a different previous top bidder.
     const prev = result.previousTop as any;
-    if (prev) {
+    if (prev && prev.userId !== userId) {
       this.gateway.emitOutbid(prev.userId, {
         auctionId: dto.auctionId,
         message: "you've been outbid",

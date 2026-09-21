@@ -97,10 +97,9 @@ describe('BidsService', () => {
     );
   });
 
-  it('skips the outbid push for the first bid but notifies on self outbids', async () => {
+  it('skips the outbid push for the first bid and for self outbids', async () => {
     prisma.auction.findUnique.mockResolvedValue(auctionRow);
 
-    // First bid: no previous top bidder.
     runTransaction({
       $queryRaw: jest.fn().mockResolvedValue([lockedRow]),
       bid: {
@@ -126,7 +125,6 @@ describe('BidsService', () => {
     });
     expect(gateway.emitOutbid).not.toHaveBeenCalled();
 
-    // Self outbid: previous top is the same user — still notified.
     gateway.emitOutbid.mockClear();
     runTransaction({
       $queryRaw: jest.fn().mockResolvedValue([lockedRow]),
@@ -153,14 +151,6 @@ describe('BidsService', () => {
       auctionId: 'auction-1',
       amount: 160,
     });
-    expect(gateway.emitOutbid).toHaveBeenCalledTimes(1);
-    expect(gateway.emitOutbid).toHaveBeenCalledWith(
-      'new-user',
-      expect.objectContaining({
-        auctionId: 'auction-1',
-        newAmount: 160,
-        newBidderId: 'new-user',
-      }),
-    );
+    expect(gateway.emitOutbid).not.toHaveBeenCalled();
   });
 });

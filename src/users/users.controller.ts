@@ -72,9 +72,6 @@ export class UsersController {
     @Body() dto: ConfirmEmailChangeDto,
     @Res({ passthrough: true }) _res: Response,
   ) {
-    // Every session is revoked by the confirm, including this device's
-    // refresh session and live access token - the client must log in again
-    // with the new email.
     const hashedCode = crypto
       .createHash('sha256')
       .update(dto.token)

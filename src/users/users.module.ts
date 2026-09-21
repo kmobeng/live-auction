@@ -7,7 +7,6 @@ import { PrismaService } from '../prisma.service';
 import { TokenUtils } from '../auth/utils/auth.util';
 import { OutboxModule } from '../outbox/outbox.module';
 
-// RedisService and TokenStoreService come from the @Global RedisModule
 @Module({
   imports: [OutboxModule],
   controllers: [UsersController],

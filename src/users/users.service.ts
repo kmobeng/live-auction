@@ -58,7 +58,6 @@ export class UsersService {
     userId: string,
     dto: UpdateEmailDto,
   ): Promise<void> {
-    // Validate the request and ensure the user exists
     const user = await this.prismaService.user.findUnique({
       where: { id: userId },
       select: { email: true, password: true },
@@ -72,7 +71,6 @@ export class UsersService {
       throw new ConflictException('Current password is incorrect');
     }
 
-    // Validate that the new email is different and not already taken
     if (dto.newEmail.toLowerCase() === user.email.toLowerCase()) {
       throw new BadRequestException(
         'The new email must be different from your current email',
