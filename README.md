@@ -161,15 +161,95 @@ API: `http://localhost:3000/api/v1/auctions` · Mailpit: `http://localhost:8025`
 
 ```js
 import { io } from 'socket.io-client';
-const socket = io('http://localhost:3000', { auth: { token: 'Bearer ' + TOKEN } });
+const socket = io('http://localhost:3000', { auth: { token: TOKEN } });
 
-socket.emit('joinAuction', { auctionId }, console.log);
-socket.on('bid:created', console.log);
-socket.on('bid:outbid', (p) => console.log("you've been outbid", p));
-socket.on('auction:ended', console.log);
+// Server responses arrive as message events (WsResponse shape), not emit ACKs:
+socket.on('joined', console.log); // live state after joinAuction
+socket.on('bid:placed', console.log); // confirmation after placeBid
+socket.on('bid:created', console.log); // every new highest bid (room)
+socket.on('auction:currentBid', console.log); // price + bid count (room)
+socket.on('bid:outbid', (p) => console.log("you've been outbid", p)); // previous leader only
+socket.on('auction:ended', console.log); // winner + final price (room)
+socket.on('exception', console.error); // auth/validation/bid failures
 
-socket.emit('placeBid', { auctionId, amount: 150 }, console.log);
+socket.emit('joinAuction', { auctionId });
+socket.emit('placeBid', { auctionId, amount: 150 });
 ```
+
+### Testing the outbid push (two clients required)
+
+One socket can never observe `bid:outbid`: the first bid has no previous leader, and a
+self-outbid (same user bidding twice) is intentionally silent. Use **two verified users**:
+
+1. Register/log in twice via `POST /api/v1/auth/login` and keep both access tokens.
+   Tokens issued before email verification carry `isEmailVerified: false` — re-login after
+   verifying (codes land in Mailpit at `:8025`) or `placeBid` is rejected.
+2. Open **two Socket.IO tabs** (Postman: New → Socket.IO Request) with a different token each.
+3. Authenticate the handshake **one** of these ways (checked in this order):
+   - handshake auth payload: `auth: { token }` (Postman **Auth** section, not Headers),
+   - header `Authorization: Bearer <token>` (exact name — a header literally called `auth` is ignored),
+   - query param `?token=<jwt>`.
+4. On both tabs, listen for `bid:created`, `bid:outbid`, and `exception`.
+5. On both tabs, emit `joinAuction { auctionId }` and wait for the `joined` event.
+6. Tab A: `placeBid { auctionId, amount: 100 }` → both tabs see `bid:created`, **no** `bid:outbid`.
+7. Tab B: `placeBid { auctionId, amount: 150 }` → both tabs see `bid:created`, and **only Tab A**
+   receives `bid:outbid { previousAmount: 100, newAmount: 150, newBidderId }`.
+
+If Tab A gets `bid:created` but no `bid:outbid`, its socket missed its personal `user:${id}`
+room (stale/expired token at connect, or a reconnect without rejoin). The server logs
+`bid:outbid ... has no listeners (room user:... is empty ...)` in that case — reconnect with a
+fresh token and re-emit `joinAuction`.
+
+## Event delivery contract
+
+| Event | Sent to | When |
+|---|---|---|
+| `joined` | Caller only | After `joinAuction` (full live state) |
+| `bid:placed` | Bidder only | After `placeBid` is accepted and broadcast |
+| `left` | Leaver only | After `leaveAuction` |
+| `bid:created` + `auction:currentBid` | Room `auction:${id}` | Every accepted bid |
+| `bid:outbid` | Room `user:${prevBidderId}` | Takeover by a *different* bidder only — never on the first bid or a self-outbid |
+| `auction:participantCount` | Room `auction:${id}` | Join / leave / disconnect |
+| `auction:ended` | Room `auction:${id}` | Scheduler closes the auction (winner = highest bid, `currentBid` fallback when no bids) |
+| `exception` | Caller only | Auth / verified-email / validation / bid-rule failures |
+
+Notes:
+
+- `joinAuction` / `placeBid` / `leaveAuction` respond with **message events**, not Socket.IO
+  ACK callbacks — `socket.emit('placeBid', payload, cb)` never fires `cb`; listen for `bid:placed`.
+- Email verification is enforced on `placeBid` only (`WsIsEmailVerifiedGuard`): unverified callers
+  get `Email not verified. Verify your email to place bids.` Watching and joining stay open to any
+  authenticated user.
+- Concurrency: bids serialize on a Postgres row lock (`SELECT ... FOR UPDATE` at `ReadCommitted`);
+  the loser gets `Bid must be higher than current bid (...)`. No `bid:outbid` fires for rejected bids.
+- Single-instance realtime: rooms live in server memory (no Redis adapter), so run one API replica
+  unless a shared adapter is added.
+
+## Operations
+
+- **Scheduler:** auction lifecycle sync every 30s (`UPCOMING → ACTIVE → ENDED` + `auction:ended`
+  broadcast, missed closes retried next tick); transactional outbox poller every 5s (BullMQ email queue).
+- **Infra (docker-compose):** Postgres `:5433` (host uses 5433 to avoid clashing with a local 5432),
+  Redis `:6379`, Mailpit SMTP `:1025` / inbox UI `:8025`.
+- **Key env vars:** `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET` / `JWT_EXPIRES_IN` (access, e.g. `15m`),
+  `REFRESH_JWT_SECRET` / `REFRESH_JWT_EXPIRES_IN` / `REFRESH_JWT_COOKIE_EXPIRES_IN`, `APP_URL`
+  (email link base). Never commit `.env` — copy `.env.example`.
+- **Observability:** `nestjs-pino` request IDs on HTTP; WS gateway logs joins/leaves, rejected
+  `auctionId`s, uninitialized-server drops, and empty-room `bid:outbid` skips (with auctionId);
+  successful outbid pushes log at `debug`.
+
+## Development & verification
+
+```bash
+npm test        # unit + live-socket suites (103 tests, incl. two-socket outbid delivery)
+npm run lint    # eslint (must be clean)
+npm run build   # production build (must pass)
+```
+
+Test layout: colocated `*.spec.ts` next to sources (`rootDir: src`). `src/bids/bids.outbid.spec.ts`
+boots the real gateway + service over a live Socket.IO server (only Prisma/auth/Redis are mocked)
+and asserts the takeover push reaches exactly the previous leader's socket, plus first-bid and
+self-outbid silence.
 
 Scripts: `npm run build` · `npm run start:dev` · `npm run lint` · `npm test`
 

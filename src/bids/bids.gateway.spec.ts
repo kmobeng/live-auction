@@ -24,7 +24,11 @@ const makeAuthMocks = (
 ) => {
   const tokenUtils = {
     verifyAccessToken: jest.fn(() => {
-      if (opts.verifyError) throw opts.verifyError;
+      if (opts.verifyError) {
+        throw opts.verifyError instanceof Error
+          ? opts.verifyError
+          : new Error('Invalid or expired access token');
+      }
       return opts.payload ?? { sub: 'user-1' };
     }),
   };

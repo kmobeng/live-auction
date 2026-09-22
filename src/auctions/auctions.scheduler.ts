@@ -71,14 +71,14 @@ export class AuctionsScheduler {
       for (const auction of closedUnannounced) {
         if (this.announcedEnded.has(auction.id)) continue;
         try {
-          const top = (auction as any).bids?.[0] ?? null;
+          const top = auction.bids?.[0] ?? null;
           const emitted = this.bidsGateway.emitAuctionEnded(auction.id, {
             auctionId: auction.id,
-            title: (auction as any).title,
+            title: auction.title,
             winner: top ? top.user : null,
-            finalPrice: top ? top.amount : (auction as any).currentBid,
-            bidCount: (auction as any)._count.bids,
-            endedAt: (auction as any).endTime,
+            finalPrice: top ? top.amount : auction.currentBid,
+            bidCount: auction._count.bids,
+            endedAt: auction.endTime,
           });
           if (emitted) this.announcedEnded.add(auction.id);
         } catch (err) {

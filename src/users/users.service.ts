@@ -150,8 +150,8 @@ export class UsersService {
       throw new ConflictException('This email is already in use');
     }
 
-    await this.prismaService.$transaction(async (tx) => {
-      await tx.user.update({
+    const updated = await this.prismaService.$transaction(async (tx) => {
+      const fresh = await tx.user.update({
         where: { id: userId },
         data: {
           email: pending,
@@ -162,6 +162,8 @@ export class UsersService {
       await tx.refreshToken.deleteMany({
         where: { userId },
       });
+
+      return fresh;
     });
 
     await this.tokenUtils.revokeAllAccessTokens(userId);
@@ -170,7 +172,7 @@ export class UsersService {
       await this.tokenUtils.blacklistAccessToken(jti, remainingTtl);
     }
 
-    return this.sanitize(taken!);
+    return this.sanitize(updated);
   }
 
   private sanitize(user: User): Omit<User, 'password'> {

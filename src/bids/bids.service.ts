@@ -139,14 +139,14 @@ export class BidsService {
       id: bid.id,
       amount: bid.amount,
       userId: bid.userId,
-      userName: (bid as any).user?.name ?? null,
+      userName: bid.user?.name ?? null,
       createdAt: bid.createdAt,
       currentBid: result.updatedAuction.currentBid,
       bidCount,
     });
 
     // Notify only a different previous top bidder.
-    const prev = result.previousTop as any;
+    const prev = result.previousTop;
     if (prev && prev.userId !== userId) {
       this.gateway.emitOutbid(prev.userId, {
         auctionId: dto.auctionId,
@@ -154,7 +154,7 @@ export class BidsService {
         previousAmount: prev.amount,
         newAmount: dto.amount,
         newBidderId: userId,
-        newBidderName: (bid as any).user?.name ?? null,
+        newBidderName: bid.user?.name ?? null,
       });
     }
 

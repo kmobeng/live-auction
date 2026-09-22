@@ -389,8 +389,10 @@ describe('AuthService', () => {
       expect(prisma.refreshToken.deleteMany).toHaveBeenCalledWith({
         where: { userId: 'user-1' },
       });
-      expect(tokenUtils.blacklistAccessToken).toHaveBeenCalledWith(
-        'jti-2',
+      expect(redisSet).toHaveBeenCalledWith(
+        'blacklist:jti-2',
+        'true',
+        'EX',
         300,
       );
     });
@@ -400,7 +402,7 @@ describe('AuthService', () => {
 
       expect(tokenUtils.revokeAllAccessTokens).toHaveBeenCalledWith('user-1');
       expect(prisma.refreshToken.deleteMany).toHaveBeenCalledTimes(1);
-      expect(tokenUtils.blacklistAccessToken).not.toHaveBeenCalled();
+      expect(redisSet).not.toHaveBeenCalled();
     });
   });
 
@@ -548,7 +550,12 @@ describe('AuthService', () => {
         where: { id: 'user-1' },
         data: { isEmailVerified: true },
       });
-      expect(tokenUtils.blacklistAccessToken).toHaveBeenCalledWith('jti-3', 90);
+      expect(redisSet).toHaveBeenCalledWith(
+        'blacklist:jti-3',
+        'true',
+        'EX',
+        90,
+      );
     });
 
     it('rejects an invalid or expired code without verifying anything', async () => {
@@ -559,7 +566,7 @@ describe('AuthService', () => {
       ).rejects.toThrow(BadRequestException);
 
       expect(prisma.user.update).not.toHaveBeenCalled();
-      expect(tokenUtils.blacklistAccessToken).not.toHaveBeenCalled();
+      expect(redisSet).not.toHaveBeenCalled();
     });
 
     it('skips the blacklist when the access token already expired', async () => {
@@ -571,7 +578,7 @@ describe('AuthService', () => {
       );
 
       expect(prisma.user.update).toHaveBeenCalled();
-      expect(tokenUtils.blacklistAccessToken).not.toHaveBeenCalled();
+      expect(redisSet).not.toHaveBeenCalled();
     });
   });
 });

@@ -142,7 +142,7 @@ describe('UsersService', () => {
 
       await expect(
         service.updateProfileService('user-1', { name: 'X' }),
-      ).rejects.toThrow(UnauthorizedException);
+      ).rejects.toThrow('P2025');
     });
   });
 
@@ -198,7 +198,9 @@ describe('UsersService', () => {
     });
 
     it('stores the pending change before queueing both emails through the outbox', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser());
+      prisma.user.findUnique
+        .mockResolvedValueOnce(makeUser())
+        .mockResolvedValueOnce(null);
 
       await service.requestEmailChangeService('user-1', dto);
 
@@ -208,10 +210,9 @@ describe('UsersService', () => {
       );
 
       expect(tokenStore.issueEmailChange).toHaveBeenCalledTimes(1);
-      const [issuedUserId, issuedNewEmail, issuedHash] =
+      const [issuedUserId, issuedHash] =
         tokenStore.issueEmailChange.mock.calls[0];
       expect(issuedUserId).toBe('user-1');
-      expect(issuedNewEmail).toBe(dto.newEmail);
 
       expect(
         tokenStore.issueEmailChange.mock.invocationCallOrder[0],
@@ -228,11 +229,13 @@ describe('UsersService', () => {
       expect(outboxParams.payload.token).toMatch(/^\d{6}$/);
       expect(issuedHash).toBe(sha256(outboxParams.payload.token));
 
-      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     });
 
     it('never queues an email when Redis cannot store the pending change', async () => {
-      prisma.user.findUnique.mockResolvedValue(makeUser());
+      prisma.user.findUnique
+        .mockResolvedValueOnce(makeUser())
+        .mockResolvedValueOnce(null);
       tokenStore.issueEmailChange.mockRejectedValue(
         new Error('connection refused'),
       );
@@ -248,13 +251,13 @@ describe('UsersService', () => {
   describe('confirmEmailChangeService', () => {
     const hashedCode = sha256('654321');
 
-    it('swaps the email, un-verifies it and revokes every session', async () => {
-      tokenStore.consumeEmailChange.mockResolvedValue({
-        newEmail: 'new-jane@example.com',
-        hash: hashedCode,
-      });
-      prisma.user.findUniqueOrThrow.mockResolvedValue(
-        makeUser({ email: 'new-jane@example.com', isEmailVerified: false }),
+    it('swaps the email, marks it verified and revokes every session', async () => {
+      prisma.user.findUnique
+        .mockResolvedValueOnce({ pendingEmail: 'new-jane@example.com' })
+        .mockResolvedValueOnce(null);
+      tokenStore.consumeEmailChange.mockResolvedValue(true);
+      tx.user.update.mockResolvedValue(
+        makeUser({ email: 'new-jane@example.com' }),
       );
 
       const result = await service.confirmEmailChangeService(
@@ -274,7 +277,7 @@ describe('UsersService', () => {
 
       expect(tx.user.update).toHaveBeenCalledWith({
         where: { id: 'user-1' },
-        data: { email: 'new-jane@example.com', isEmailVerified: false },
+        data: { email: 'new-jane@example.com', isEmailVerified: true },
       });
       expect(tx.refreshToken.deleteMany).toHaveBeenCalledWith({
         where: { userId: 'user-1' },
@@ -291,7 +294,10 @@ describe('UsersService', () => {
     });
 
     it('rejects an invalid or expired code without touching anything', async () => {
-      tokenStore.consumeEmailChange.mockResolvedValue(null);
+      prisma.user.findUnique.mockResolvedValue({
+        pendingEmail: 'new-jane@example.com',
+      });
+      tokenStore.consumeEmailChange.mockResolvedValue(false);
 
       await expect(
         service.confirmEmailChangeService('user-1', hashedCode, 120, 'jti-9'),
@@ -303,11 +309,10 @@ describe('UsersService', () => {
     });
 
     it('rejects when the address was claimed between request and confirm', async () => {
-      tokenStore.consumeEmailChange.mockResolvedValue({
-        newEmail: 'taken@example.com',
-        hash: hashedCode,
-      });
-      prisma.user.findUnique.mockResolvedValue(makeUser({ id: 'user-2' }));
+      prisma.user.findUnique
+        .mockResolvedValueOnce({ pendingEmail: 'taken@example.com' })
+        .mockResolvedValueOnce(makeUser({ id: 'user-2' }));
+      tokenStore.consumeEmailChange.mockResolvedValue(true);
 
       await expect(
         service.confirmEmailChangeService('user-1', hashedCode, 120, 'jti-9'),
@@ -318,13 +323,11 @@ describe('UsersService', () => {
     });
 
     it('skips the caller jti blacklist when their access token already expired', async () => {
-      tokenStore.consumeEmailChange.mockResolvedValue({
-        newEmail: 'new-jane@example.com',
-        hash: hashedCode,
-      });
-      prisma.user.findUniqueOrThrow.mockResolvedValue(
-        makeUser({ email: 'new-jane@example.com' }),
-      );
+      prisma.user.findUnique
+        .mockResolvedValueOnce({ pendingEmail: 'new-jane@example.com' })
+        .mockResolvedValueOnce(makeUser());
+      tokenStore.consumeEmailChange.mockResolvedValue(true);
+      tx.user.update.mockResolvedValue(makeUser());
 
       await service.confirmEmailChangeService('user-1', hashedCode, 0, 'jti-9');
 

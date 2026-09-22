@@ -337,21 +337,26 @@ export class BidsGateway {
       newBidderId: string;
       newBidderName?: string | null;
     },
-  ) {
+  ): boolean {
     if (!this.server) {
       this.logger.warn(
-        `bid:outbid NOT sent to user ${outbidUserId}: socket server not initialized`,
+        `bid:outbid NOT sent to user ${outbidUserId} for auction ${payload.auctionId}: socket server not initialized`,
       );
-      return;
+      return false;
     }
     const room = this.userRoomName(outbidUserId);
     const size = this.server.sockets.adapter.rooms.get(room)?.size ?? 0;
     if (size === 0) {
       this.logger.warn(
-        `bid:outbid for user ${outbidUserId} has no listeners (room ${room} is empty — victim may have reconnected without rejoining)`,
+        `bid:outbid for user ${outbidUserId} for auction ${payload.auctionId} has no listeners (room ${room} is empty — victim may have reconnected without rejoining)`,
+      );
+    } else {
+      this.logger.debug(
+        `bid:outbid sent to user ${outbidUserId} for auction ${payload.auctionId} (${size} socket(s))`,
       );
     }
     this.server.to(room).emit('bid:outbid', payload);
+    return size > 0;
   }
 
   emitAuctionEnded(auctionId: string, payload: Record<string, any>): boolean {

@@ -84,41 +84,39 @@ describe('TokenStoreService', () => {
   });
 
   describe('pending email changes', () => {
-    it('round-trips the new email through the stored payload', async () => {
-      await service.issueEmailChange('user-1', 'new@example.com', 'hash-123');
+    it('stores the hashed code per user with a 10 minute TTL', async () => {
+      await service.issueEmailChange('user-1', 'hash-123');
 
       expect(client.set).toHaveBeenCalledWith(
         'email-change:user-1',
-        JSON.stringify({ newEmail: 'new@example.com', hash: 'hash-123' }),
+        'hash-123',
         'EX',
         TOKEN_TTL_SECONDS,
       );
+    });
 
-      client.get.mockResolvedValue(
-        JSON.stringify({ newEmail: 'new@example.com', hash: 'hash-123' }),
-      );
+    it('consumes a matching code exactly once', async () => {
+      client.get.mockResolvedValue('hash-123');
+
       const consumed = await service.consumeEmailChange('user-1', 'hash-123');
-      expect(consumed).toEqual({
-        newEmail: 'new@example.com',
-        hash: 'hash-123',
-      });
+
+      expect(consumed).toBe(true);
       expect(client.del).toHaveBeenCalledWith('email-change:user-1');
     });
 
     it('rejects a wrong code without consuming the pending change', async () => {
-      client.get.mockResolvedValue(
-        JSON.stringify({ newEmail: 'new@example.com', hash: 'hash-123' }),
-      );
+      client.get.mockResolvedValue('hash-123');
 
       const consumed = await service.consumeEmailChange('user-1', 'nope');
 
-      expect(consumed).toBeNull();
+      expect(consumed).toBe(false);
       expect(client.del).not.toHaveBeenCalled();
     });
 
-    it('returns null when nothing is pending or it expired', async () => {
+    it('returns false when nothing is pending or it expired', async () => {
       const consumed = await service.consumeEmailChange('user-1', 'hash-123');
-      expect(consumed).toBeNull();
+      expect(consumed).toBe(false);
+      expect(client.del).not.toHaveBeenCalled();
     });
   });
 
